@@ -59,9 +59,10 @@ without a protocol of their own in CNM can usually be added via ONVIF. Details:
 
 ## Installation
 
-Download the installation archive for your version and copy it to the server
-(or build it yourself, see [Building from source](#building-from-source)).
-Then, as root:
+Download the installer or the installation archive from the
+[latest release](https://github.com/testbild-media/Camera-Network-Monitor/releases/latest)
+and copy it to the server (or build it yourself, see
+[Building from source](#building-from-source)). Then, as root:
 
 ```bash
 tar xzf camera-network-monitor-<version>.tar.gz

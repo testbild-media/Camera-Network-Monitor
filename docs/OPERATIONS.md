@@ -57,6 +57,8 @@ The data directory contains:
 
 ## Installation
 
+Both installation files are attached to every
+[release on GitHub](https://github.com/testbild-media/Camera-Network-Monitor/releases/latest).
 There are two ways to install, both doing the same:
 
 - the **complete archive** `camera-network-monitor-<version>.tar.gz`
