@@ -1,0 +1,66 @@
+[Unit]
+Description=Camera Network Monitor
+Documentation=file:///opt/camera-network-monitor/docs/OPERATIONS.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=cnm
+Group=cnm
+ExecStart=/opt/camera-network-monitor/bin/cnm serve --data-dir /var/lib/camera-network-monitor --display-socket /run/camera-network-monitor/display.sock
+# A fresh installation (no config.json yet) manages the bundled go2rtc itself
+# unless another go2rtc already answers on 127.0.0.1:1984. Existing
+# configurations are never changed by this setting.
+Environment=CNM_DEFAULT_MANAGE_GO2RTC=auto
+WorkingDirectory=/var/lib/camera-network-monitor
+StateDirectory=camera-network-monitor
+StateDirectoryMode=0750
+# socket for the local display agent (access is checked by peer uid)
+RuntimeDirectory=camera-network-monitor
+RuntimeDirectoryMode=0755
+UMask=0077
+
+Restart=always
+RestartSec=3
+# CNM guarantees termination within ~5 s (hard guard); keep a margin.
+TimeoutStartSec=60
+TimeoutStopSec=15
+# The watchdog is only fed while the HTTP server answers.
+WatchdogSec=90
+LimitNOFILE=65536
+
+# ---- hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# other local users cannot see CNM's processes (FFmpeg command lines carry DVR URLs)
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# no MemoryDenyWriteExecute=: the bundled go2rtc release binary is UPX
+# compressed and unpacks itself into executable memory at start – with the
+# setting it crashes immediately (SIGSEGV)
+RemoveIPC=yes
+# AF_NETLINK: go2rtc enumerates interfaces for WebRTC candidates
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

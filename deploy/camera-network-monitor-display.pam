@@ -1,0 +1,8 @@
+#%PAM-1.0
+# Camera Network Monitor – display session (started by systemd, no login).
+# pam_systemd registers the session with logind so the display agent may use
+# the GPU and the seat of tty7 without root rights.
+auth     required pam_unix.so nullok
+account  required pam_unix.so
+session  required pam_unix.so
+session  required pam_systemd.so

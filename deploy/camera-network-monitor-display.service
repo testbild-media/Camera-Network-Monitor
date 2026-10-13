@@ -1,0 +1,60 @@
+[Unit]
+Description=Camera Network Monitor – lokale Displays (Kiosk-Ausgabe)
+Documentation=file:///opt/camera-network-monitor/docs/OPERATIONS.md
+# The agent runs the Wayland kiosk compositor (sway) directly on the GPU in a
+# logind session on tty7 and shows the multiviewers assigned in the CNM
+# settings ("Displays"). It talks to CNM only through its local socket.
+After=systemd-user-sessions.service systemd-logind.service camera-network-monitor.service plymouth-quit-wait.service getty@tty7.service
+Wants=systemd-logind.service camera-network-monitor.service
+Conflicts=getty@tty7.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=cnm-display
+Group=cnm-display
+# logind session on tty7 → access to GPU (DRM) and seat without root
+PAMName=camera-network-monitor-display
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty7
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_SESSION_CLASS=user
+# The agent brings tty7 to the foreground itself – only while a multiviewer
+# is assigned – and gives the console back otherwise (Ctrl+Alt+F1 always works).
+ExecStart=/opt/camera-network-monitor/bin/cnm display --socket /run/camera-network-monitor/display.sock
+StateDirectory=camera-network-monitor-display
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/camera-network-monitor-display
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+
+# ---- hardening (browsers need their own sandbox, see docs/OPERATIONS.md) ----
+ProtectSystem=full
+# no ProtectHome=: it would also make /run/user (XDG_RUNTIME_DIR with the
+# Wayland/IPC sockets of sway and the browser) read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# not set on purpose: NoNewPrivileges/RestrictSUIDSGID/RestrictNamespaces/
+# MemoryDenyWriteExecute – they break the browser's own sandbox and JIT
+
+[Install]
+WantedBy=multi-user.target

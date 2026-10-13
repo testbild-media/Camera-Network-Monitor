@@ -1,0 +1,6 @@
+/dist/
+/.cache/
+/data/
+*.exe
+*.test
+/.dev/

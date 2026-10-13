@@ -1,0 +1,57 @@
+Camera Network Monitor @VERSION@ – Installation
+==================================================
+
+Requirements
+  - Debian 11 or newer, or Ubuntu 20.04 or newer
+  - Architecture x86_64 (amd64), aarch64 (arm64) or armv7
+  - root access and access to the distribution's package sources
+    (internet or a local mirror) – FFmpeg, graphics drivers, sway and the
+    kiosk browsers are installed from there
+
+Installation
+  1. Copy the archive to the server, e.g.
+       scp camera-network-monitor-@VERSION@.tar.gz user@server:
+  2. Become root – Debian: "su -" (with the dash) or log in as root;
+     Ubuntu: run the commands with "sudo".
+  3. Unpack and start the setup:
+       tar xzf camera-network-monitor-@VERSION@.tar.gz
+       cd camera-network-monitor-@VERSION@
+       ./setup.sh                    (Ubuntu: sudo ./setup.sh)
+  4. Answer the questions at the beginning (local displays, graphics driver
+     for Intel/AMD/NVIDIA/VM – the detected card is preselected –, browser,
+     first administrator, monitor assignment, firewall). The installation
+     then runs without further questions and offers a reboot at the end if
+     one is needed.
+  5. Open the web interface in a browser:  http://<server>:8090/
+
+Console on the server
+  With one graphics card, console and wall display share the monitor:
+  Ctrl+Alt+F1 switches to the console, Ctrl+Alt+F7 back to the wall display.
+  With several graphics cards (e.g. VGA as console plus a GPU for the
+  monitors), the setup asks which card drives the monitors – the console
+  then stays untouched. Emergency: see docs/OPERATIONS.md, section
+  "Console and several graphics cards".
+
+Unattended
+  CNM_ADMIN_PASSWORD='…' ./setup.sh --yes --display --admin-user=admin   (as root)
+  All options:  ./setup.sh --help
+
+Update
+  Unpack the new archive and run  ./setup.sh  again (as root).
+  Configuration, users, master.key and drivers are kept.
+
+Uninstall
+  /opt/camera-network-monitor/uninstall.sh   (as root; the data is kept;
+  --purge also deletes /var/lib/camera-network-monitor)
+
+Contents
+  setup.sh       entry point – picks the matching package automatically
+  linux-amd64/   package for x86_64
+  linux-arm64/   package for 64-bit ARM (e.g. Raspberry Pi 4/5 with a 64-bit OS)
+  linux-arm/     package for 32-bit ARMv7
+  docs/          user guide, operations manual, protocols, architecture, tests
+  SHA256SUMS     checksums of all files (check with: sha256sum -c SHA256SUMS)
+
+Setup log:     /var/log/camera-network-monitor-setup.log
+Manual:        docs/OPERATIONS.md
+User guide:    docs/USER-GUIDE.md
