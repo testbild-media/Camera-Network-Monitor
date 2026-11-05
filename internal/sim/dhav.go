@@ -22,9 +22,9 @@ func DHAV(clip *Clip, start time.Time, frames int) []byte {
 	for i := 0; i < frames; i++ {
 		au := clip.AUs[i%len(clip.AUs)]
 		ts := start.Add(time.Duration(i) * frameDur)
-		typ := byte(0xFD)
+		typ := byte(0xFC) // P frame
 		if au.Key {
-			typ = 0xFC
+			typ = 0xFD // I frame (as real recorders mark them)
 		}
 		// extension: 0x80 size (w/8, h/8), 0x81 codec 0x02 (H.264) + frame rate
 		ext := []byte{0x80, 0, byte(clip.W / 8), byte(clip.H / 8), 0x81, 0, 0x02, byte(clip.FPS)}

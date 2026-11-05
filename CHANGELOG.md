@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.2
+
+### Fixes
+
+- Dahua (RPC2): some firmware counts playback channels from 0 instead of 1
+  (seen on 4-channel recorders): playing camera 3 showed camera 4, camera 4
+  reported "no recordings", and the firmware refuses camera 1 over RTSP. CNM
+  now detects this numbering by itself. Cameras 2 and up play over RTSP with
+  the device's numbering, camera 1 from the recorder's download interface.
+  Because such recorders only deliver whole recording files there, starting
+  camera 1 can take up to about half a minute, depending on the position
+  within the recording file.
+
 ## 1.1.1
 
 ### Fixes

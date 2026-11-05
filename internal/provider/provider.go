@@ -320,6 +320,9 @@ type PlaybackSource struct {
 	InputArgs []string // extra FFmpeg input options (e.g. -rtsp_transport tcp)
 	Reader    io.ReadCloser
 	Format    string
+	// StartupTimeout extends the time until the first picture for sources
+	// that must skip to the requested time themselves (0 = default).
+	StartupTimeout time.Duration
 }
 
 // PlaybackOpener is implemented by drivers with historical playback.

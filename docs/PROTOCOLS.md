@@ -83,6 +83,16 @@ and what works.
   the native port, which delivers the recording as fast as the device can.
   An error on the native port does **not** lock the device – live video via
   RTSP keeps working.
+- **Playback numbering:** some firmware (seen on 4-channel recorders) counts
+  RTSP playback channels from 0 instead of 1 and refuses the first camera
+  over RTSP. CNM detects this on the first playback after connecting. Then
+  cameras 2 and up play over RTSP with the device's numbering, and camera 1
+  is fetched from the recorder's download interface (`loadfile.cgi`). That
+  interface only delivers whole recording files (usually one hour), so CNM
+  skips to the requested time itself; starting camera 1 can take up to about
+  half a minute.
+- **Time format:** recording lists with times padded by spaces instead of
+  zeros (`2026-11- 4 15: 0:45`) are read as well.
 
 ### Sofia (DVRIP)
 

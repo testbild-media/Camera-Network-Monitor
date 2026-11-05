@@ -383,6 +383,12 @@ func (s *Service) run(ctx context.Context, w http.ResponseWriter, cameraID strin
 	if src.Reader != nil {
 		defer src.Reader.Close()
 	}
+	if src.StartupTimeout > StartupTimeout {
+		// the source skips to the requested time itself (whole recording files)
+		var slowCancel context.CancelFunc
+		startCtx, slowCancel = context.WithTimeout(ctx, src.StartupTimeout)
+		defer slowCancel()
+	}
 
 	return s.pipe(ctx, startCtx, w, cameraID, src, attachment)
 }

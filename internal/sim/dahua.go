@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,11 @@ type DahuaServer struct {
 	// TruthyEmpty answers searches without results with result true and an
 	// empty list instead of result false.
 	TruthyEmpty bool
+	// DHAVClip enables the CGI download /cgi-bin/loadfile.cgi like firmware
+	// that counts playback channels from 0: the channel is 0 based and the
+	// whole recording containing startTime is sent from its beginning
+	// (Range headers are ignored).
+	DHAVClip *Clip
 	// Recordings returns recorded ranges (device wall clock) for a channel.
 	Recordings func(channel int, from, to time.Time) [][2]time.Time
 	Loc        *time.Location
@@ -67,6 +73,7 @@ func (d *DahuaServer) Listen(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/RPC2_Login", d.login)
 	mux.HandleFunc("/RPC2", d.rpc)
+	mux.HandleFunc("/cgi-bin/loadfile.cgi", d.loadfile)
 	d.srv = &http.Server{Handler: mux}
 	go d.srv.Serve(ln)
 	return nil
@@ -286,4 +293,58 @@ func QuarterSchedule(_ int, from, to time.Time) [][2]time.Time {
 // InQuarterSchedule reports whether t lies inside QuarterSchedule material.
 func InQuarterSchedule(_ int, t time.Time) bool {
 	return t.Sub(t.Truncate(15*time.Minute)) < 10*time.Minute
+}
+
+const dahuaNonce = "6c6f616466696c652d73696d"
+
+// loadfile serves /cgi-bin/loadfile.cgi?action=startLoad&channel=N&startTime=…
+// with HTTP Digest authentication.
+func (d *DahuaServer) loadfile(w http.ResponseWriter, r *http.Request) {
+	if !digestOK(r, d.User, d.Pass, dahuaNonce) {
+		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Digest realm="Login to SIM", qop="auth", nonce="%s"`, dahuaNonce))
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	q := r.URL.Query()
+	ch, err := strconv.Atoi(q.Get("channel"))
+	start, err2 := time.ParseInLocation("2006-01-02 15:04:05", q.Get("startTime"), d.Loc)
+	if d.DHAVClip == nil || q.Get("action") != "startLoad" || err != nil || err2 != nil || ch < 0 || ch >= d.Channels || d.Recordings == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var seg [2]time.Time
+	for _, s := range d.Recordings(ch, start.Add(-2*time.Hour), start.Add(2*time.Hour)) {
+		if !start.Before(s[0]) && start.Before(s[1]) {
+			seg = s
+		}
+	}
+	if seg[0].IsZero() {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	frames := int(seg[1].Sub(seg[0]) / (time.Second / time.Duration(d.DHAVClip.FPS)))
+	data := DHAV(d.DHAVClip, seg[0].In(d.Loc), frames)
+	w.Header().Set("Content-Type", "application/http")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
+}
+
+// digestOK checks an HTTP Digest (qop=auth) answer.
+func digestOK(r *http.Request, user, pass, nonce string) bool {
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, "Digest ") {
+		return false
+	}
+	p := map[string]string{}
+	for _, m := range digestParam.FindAllStringSubmatch(h[7:], -1) {
+		v := m[2]
+		if v == "" {
+			v = m[3]
+		}
+		p[strings.ToLower(m[1])] = v
+	}
+	ha1 := md5h(user + ":" + p["realm"] + ":" + pass)
+	ha2 := md5h(r.Method + ":" + p["uri"])
+	want := md5h(ha1 + ":" + p["nonce"] + ":" + p["nc"] + ":" + p["cnonce"] + ":auth:" + ha2)
+	return p["username"] == user && p["nonce"] == nonce && p["response"] == want
 }

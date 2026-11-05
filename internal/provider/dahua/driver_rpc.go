@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cnm/internal/provider"
@@ -37,10 +38,14 @@ func parseDahuaTime(s string) (time.Time, error) {
 }
 
 type rpcDriver struct {
-	cfg   provider.DeviceConfig
-	env   provider.Env
-	rpc   *rpcClient
-	clock provider.Clock
+	cfg      provider.DeviceConfig
+	env      provider.Env
+	rpc      *rpcClient
+	clock    provider.Clock
+	channels int // from the device's channel titles
+
+	pbMu   sync.Mutex
+	pbBase int // playback channel numbering (pbUnknown until detected)
 }
 
 func newRPCDriver(cfg provider.DeviceConfig, env provider.Env, variant string) *rpcDriver {
@@ -95,6 +100,7 @@ func (d *rpcDriver) Connect(ctx context.Context) (*provider.DeviceInfo, error) {
 		if decodeParams(r, &p) == nil {
 			info.ChannelNames = map[int]string{}
 			info.Channels = len(p.Table)
+			d.channels = info.Channels
 			for i, t := range p.Table {
 				if t.Name != "" {
 					info.ChannelNames[i] = t.Name
@@ -296,13 +302,20 @@ func (d *rpcDriver) HasRecordings(ctx context.Context, channel int, from, to tim
 	return len(p.Infos) > 0, nil
 }
 
-// OpenPlayback returns the Dahua RTSP playback URL for FFmpeg.
+// OpenPlayback returns the Dahua RTSP playback URL for FFmpeg. On firmware
+// that counts playback channels from 0 (see playback_rpc.go) the number is
+// shifted, and the first camera, which such firmware refuses over RTSP, is
+// played from the CGI download.
 func (d *rpcDriver) OpenPlayback(ctx context.Context, channel int, from, to time.Time) (*provider.PlaybackSource, error) {
-	const layout = "2006_01_02_15_04_05"
-	path := "/cam/playback"
-	q := "channel=" + strconv.Itoa(channel+1) + "&subtype=0&starttime=" + d.clock.ToDevice(from).Format(layout) + "&endtime=" + d.clock.ToDevice(to).Format(layout)
-	u := provider.CredURL("rtsp", d.cfg.Username, d.cfg.Password, d.cfg.Host, d.cfg.Port("rtsp"), path, nil, "")
-	return &provider.PlaybackSource{URL: u + "?" + q, InputArgs: []string{"-rtsp_transport", "tcp"}}, nil
+	num := channel + 1
+	if d.playbackNumbering(ctx) == pbFromZero {
+		if channel == 0 {
+			return d.openHTTPPlayback(ctx, channel, from, to)
+		}
+		num = channel
+	}
+	u := provider.CredURL("rtsp", d.cfg.Username, d.cfg.Password, d.cfg.Host, d.cfg.Port("rtsp"), "/cam/playback", nil, "")
+	return &provider.PlaybackSource{URL: u + "?" + d.playbackQuery(num, from, to), InputArgs: []string{"-rtsp_transport", "tcp"}}, nil
 }
 
 func (d *rpcDriver) Close() {

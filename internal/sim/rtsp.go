@@ -48,6 +48,9 @@ type RTSPServer struct {
 	// open) and returns the end of the footage to stream; ok=false answers
 	// 457 Invalid Range.
 	ONVIFReplay func(channel int, start, end time.Time) (until time.Time, ok bool)
+	// ZeroBasedPlayback mimics firmware that numbers playback channels from
+	// 0: channel=N plays channel N+1, channel=0 is refused with 401.
+	ZeroBasedPlayback bool
 
 	ln        net.Listener
 	AuthFails atomic.Int32
@@ -299,6 +302,13 @@ func (s *RTSPServer) serve(c net.Conn) {
 			if !ok {
 				reply(r, "404 Not Found", nil, "")
 				continue
+			}
+			if rt.Playback && s.ZeroBasedPlayback {
+				if rt.Channel == 0 {
+					reply(r, "401 Unauthorized", map[string]string{"WWW-Authenticate": fmt.Sprintf(`Digest realm="cnm-sim", nonce="%s"`, s.nonce)}, "")
+					continue
+				}
+				rt.Channel++
 			}
 			clip = s.Clip(rt.Channel, rt.Subtype)
 			stalled = !rt.Playback && s.Stall != nil && s.Stall(rt.Channel, rt.Subtype)

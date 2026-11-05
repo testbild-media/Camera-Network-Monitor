@@ -6,7 +6,9 @@ import { openDialog, setMessage } from './dialog.js';
 import { snapToRecording, tickStep, ticks, formatHover, formatTick, timeAt, percentOf, validateRange } from './timeline.js';
 
 export const DEFAULT_RANGE_MS = 15 * 60 * 1000;
-const CLIENT_START_TIMEOUT_MS = 16000;
+// fallback only: the server answers with its own timeout first (12 s, up to
+// 2 min for recorders whose recordings CNM must skip to the start time itself)
+const CLIENT_START_TIMEOUT_MS = 135000;
 const MAX_ROWS = 100;
 
 const MESSAGES = {
