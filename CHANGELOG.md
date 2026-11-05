@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1
+
+### Fixes
+
+- Dahua (RPC2): some recorders list their recordings with times padded by
+  spaces instead of zeros (e.g. `2026-11- 4 15: 0:45`). CNM could not read
+  them, so the playback timeline stayed empty although the recorder had
+  recordings. Both formats are read now; a time format CNM cannot read is
+  reported as an error instead of an empty timeline.
+- Dahua (RPC2): the check whether a camera has recordings no longer counts
+  an empty answer from the recorder as "recordings available".
+
 ## 1.1.0 – first public release
 
 Camera Network Monitor was rewritten from scratch as a single Go program with

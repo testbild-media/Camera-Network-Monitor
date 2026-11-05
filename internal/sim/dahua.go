@@ -22,6 +22,14 @@ type DahuaServer struct {
 	// (client type "Web3.0", loginType "Direct", session in the request
 	// body only) instead of the classic one ("Dahua3.0-Web3.0" plus session cookie).
 	Web3 bool
+	// SpacePadded sends times like some firmware does: padded with spaces
+	// instead of zeros ("2026-11- 4 15: 0:45").
+	SpacePadded bool
+	// NoStorageAPI answers storage.getDeviceAllInfo with "method not found".
+	NoStorageAPI bool
+	// TruthyEmpty answers searches without results with result true and an
+	// empty list instead of result false.
+	TruthyEmpty bool
 	// Recordings returns recorded ranges (device wall clock) for a channel.
 	Recordings func(channel int, from, to time.Time) [][2]time.Time
 	Loc        *time.Location
@@ -160,6 +168,13 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 		writeJ(w, map[string]any{"id": q.ID, "result": true, "session": sess, "params": params})
 	}
 	const layout = "2006-01-02 15:04:05"
+	format := func(t time.Time) string {
+		t = t.In(d.Loc)
+		if d.SpacePadded {
+			return fmt.Sprintf("%4d-%2d-%2d %2d:%2d:%2d", t.Year(), int(t.Month()), t.Day(), t.Hour(), t.Minute(), t.Second())
+		}
+		return t.Format(layout)
+	}
 	switch q.Method {
 	case "global.keepAlive":
 		ok(map[string]any{"timeout": 300})
@@ -169,7 +184,7 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 		d.mu.Unlock()
 		ok(nil)
 	case "global.getCurrentTime":
-		ok(map[string]any{"time": time.Now().In(d.Loc).Format(layout)})
+		ok(map[string]any{"time": format(time.Now())})
 	case "magicBox.getDeviceType":
 		ok(map[string]any{"type": "DVR-SIM"})
 	case "magicBox.getSerialNo":
@@ -183,6 +198,10 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 		}
 		ok(map[string]any{"table": table})
 	case "storage.getDeviceAllInfo":
+		if d.NoStorageAPI {
+			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess, "error": map[string]any{"code": 268894210, "message": ""}})
+			return
+		}
 		if !d.HasDisk {
 			ok(map[string]any{"info": []any{}})
 			return
@@ -212,7 +231,7 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 			f.results = d.Recordings(p.Condition.Channel, from, to)
 		}
 		d.mu.Unlock()
-		writeJ(w, map[string]any{"id": q.ID, "result": f != nil && len(f.results) > 0, "session": sess})
+		writeJ(w, map[string]any{"id": q.ID, "result": f != nil && (len(f.results) > 0 || d.TruthyEmpty), "session": sess})
 	case "mediaFileFind.findNextFile":
 		var p struct {
 			Count int `json:"count"`
@@ -224,11 +243,15 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 		if f != nil {
 			for f.pos < len(f.results) && len(infos) < p.Count {
 				r := f.results[f.pos]
-				infos = append(infos, map[string]any{"Channel": 0, "StartTime": r[0].In(d.Loc).Format(layout), "EndTime": r[1].In(d.Loc).Format(layout), "Type": "dav"})
+				infos = append(infos, map[string]any{"Channel": 0, "StartTime": format(r[0]), "EndTime": format(r[1]), "Type": "dav"})
 				f.pos++
 			}
 		}
 		d.mu.Unlock()
+		if len(infos) == 0 && d.TruthyEmpty {
+			ok(map[string]any{"found": 0, "infos": []any{}})
+			return
+		}
 		if len(infos) == 0 {
 			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess})
 			return

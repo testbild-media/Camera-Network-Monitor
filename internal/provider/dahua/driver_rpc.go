@@ -3,6 +3,8 @@ package dahua
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +13,28 @@ import (
 )
 
 const dahuaTime = "2006-01-02 15:04:05"
+
+// dahuaTimeRe accepts the zero padded form ("2026-11-04 15:00:45") and the
+// space padded one some firmware sends in recording lists
+// ("2026-11- 4 15: 0:45").
+var dahuaTimeRe = regexp.MustCompile(`^(\d{4})-\s*(\d{1,2})-\s*(\d{1,2})[ T]+(\d{1,2}):\s*(\d{1,2}):\s*(\d{1,2})$`)
+
+// parseDahuaTime reads a device wall clock time (location UTC = device fields).
+func parseDahuaTime(s string) (time.Time, error) {
+	m := dahuaTimeRe.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return time.Time{}, fmt.Errorf("dahua: unreadable time %q", s)
+	}
+	var n [6]int
+	for i := range n {
+		n[i], _ = strconv.Atoi(m[i+1])
+	}
+	if n[1] < 1 || n[1] > 12 || n[2] < 1 || n[2] > 31 || n[3] > 24 || n[4] > 59 || n[5] > 59 {
+		return time.Time{}, fmt.Errorf("dahua: invalid time %q", s)
+	}
+	// hour 24 (end of day) normalises to 00:00 of the next day
+	return time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, time.UTC), nil
+}
 
 type rpcDriver struct {
 	cfg   provider.DeviceConfig
@@ -93,7 +117,7 @@ func (d *rpcDriver) syncTime(ctx context.Context) {
 	if decodeParams(r, &p) != nil {
 		return
 	}
-	wall, err := time.Parse(dahuaTime, strings.TrimSpace(p.Time))
+	wall, err := parseDahuaTime(p.Time)
 	if err != nil {
 		return
 	}
@@ -185,6 +209,7 @@ func (d *rpcDriver) SearchRecordings(ctx context.Context, channel int, from, to 
 		return nil, nil // no matching files
 	}
 	var out []provider.Recording
+	unreadable := ""
 	for i := 0; i < 50; i++ {
 		r, err := d.rpc.call(ctx, "mediaFileFind.findNextFile", map[string]any{"count": 100}, object)
 		if err != nil {
@@ -201,9 +226,10 @@ func (d *rpcDriver) SearchRecordings(ctx context.Context, channel int, from, to 
 			break
 		}
 		for _, inf := range p.Infos {
-			s, e1 := time.Parse(dahuaTime, strings.TrimSpace(inf.StartTime))
-			e, e2 := time.Parse(dahuaTime, strings.TrimSpace(inf.EndTime))
+			s, e1 := parseDahuaTime(inf.StartTime)
+			e, e2 := parseDahuaTime(inf.EndTime)
 			if e1 != nil || e2 != nil {
+				unreadable = inf.StartTime + " – " + inf.EndTime
 				continue
 			}
 			out = append(out, provider.Recording{Start: d.clock.FromDevice(s), End: d.clock.FromDevice(e)})
@@ -212,6 +238,11 @@ func (d *rpcDriver) SearchRecordings(ctx context.Context, channel int, from, to 
 		if n < 100 || len(p.Infos) == 0 {
 			break
 		}
+	}
+	if len(out) == 0 && unreadable != "" {
+		// the device found recordings, but CNM cannot read their times:
+		// say so instead of showing an empty timeline
+		return nil, provider.NewError(provider.KindProtocol, nil, "Aufnahmeliste: unbekanntes Zeitformat (%q)", unreadable)
 	}
 	return provider.MergeRecordings(out, from, to, 2*time.Second), nil
 }
@@ -247,7 +278,22 @@ func (d *rpcDriver) HasRecordings(ctx context.Context, channel int, from, to tim
 	if err != nil {
 		return false, err
 	}
-	return r.ok(), nil
+	if !r.ok() {
+		return false, nil
+	}
+	// a truthy answer alone is not enough: some firmware answers true with
+	// an empty list
+	var p struct {
+		Found json.Number       `json:"found"`
+		Infos []json.RawMessage `json:"infos"`
+	}
+	if decodeParams(r, &p) != nil {
+		return false, nil
+	}
+	if n, err := strconv.Atoi(p.Found.String()); err == nil {
+		return n > 0, nil
+	}
+	return len(p.Infos) > 0, nil
 }
 
 // OpenPlayback returns the Dahua RTSP playback URL for FFmpeg.
