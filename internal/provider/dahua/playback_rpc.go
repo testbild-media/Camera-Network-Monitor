@@ -90,6 +90,7 @@ func (d *rpcDriver) playbackNumbering(ctx context.Context) int {
 // recordingFile is one entry of the device's recording list (device wall clock).
 type recordingFile struct {
 	start, end time.Time
+	length     int64 // bytes, if reported
 }
 
 // listFiles returns up to max recording files of a channel overlapping
@@ -125,8 +126,9 @@ func (d *rpcDriver) listFiles(ctx context.Context, channel int, from, to time.Ti
 		}
 		var p struct {
 			Infos []struct {
-				StartTime string `json:"StartTime"`
-				EndTime   string `json:"EndTime"`
+				StartTime string      `json:"StartTime"`
+				EndTime   string      `json:"EndTime"`
+				Length    json.Number `json:"Length"`
 			} `json:"infos"`
 		}
 		if !r.ok() || decodeParams(r, &p) != nil || len(p.Infos) == 0 {
@@ -136,7 +138,15 @@ func (d *rpcDriver) listFiles(ctx context.Context, channel int, from, to time.Ti
 			s, e1 := parseDahuaTime(inf.StartTime)
 			e, e2 := parseDahuaTime(inf.EndTime)
 			if e1 == nil && e2 == nil && e.After(s) {
-				out = append(out, recordingFile{start: s, end: e})
+				n, err := inf.Length.Int64()
+				if err != nil {
+					f, _ := inf.Length.Float64()
+					n = int64(f)
+				}
+				if n < 0 {
+					n = 0
+				}
+				out = append(out, recordingFile{start: s, end: e, length: n})
 			}
 		}
 		if len(p.Infos) < count {

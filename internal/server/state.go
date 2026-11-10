@@ -30,6 +30,8 @@ type PublicCamera struct {
 	// Playback is only offered when the device supports it AND holds
 	// recordings for this camera – and never in kiosk sessions.
 	Playback bool `json:"playback"`
+	// PTZ: the camera can be steered (users only).
+	PTZ bool `json:"ptz,omitempty"`
 }
 
 // PublicState is the structural state pushed to browsers.
@@ -57,6 +59,7 @@ func (s *Server) cameraList(c *config.Config, scope string) []PublicCamera {
 	type devInfo struct {
 		label string
 		names map[int]string
+		ptz   map[int]int
 		caps  provider.Capabilities
 	}
 	devs := map[string]*devInfo{}
@@ -64,6 +67,7 @@ func (s *Server) cameraList(c *config.Config, scope string) []PublicCamera {
 		di := &devInfo{label: d.Label}
 		if st, ok := s.Devices.Status(d.ID); ok && st.Info != nil {
 			di.names = st.Info.ChannelNames
+			di.ptz = st.Info.PTZ
 		}
 		if p, model, err := provider.Resolve(d.Protocol); err == nil {
 			di.caps = provider.DeviceCapabilities(p, model, d.Variant())
@@ -86,6 +90,9 @@ func (s *Server) cameraList(c *config.Config, scope string) []PublicCamera {
 		}
 		if scope == "" && cam.Enabled && di.caps.Playback.Enabled() && s.Playback != nil {
 			pc.Playback = s.Playback.Availability(cam.ID) == playback.AvailYes
+		}
+		if _, ok := di.ptz[cam.Channel]; ok && scope == "" && cam.Enabled && di.caps.PTZ.Enabled() && s.PTZ != nil {
+			pc.PTZ = true
 		}
 		if cs := streams[cam.ID]; cs != nil && cam.Enabled {
 			pc.Multiview, pc.Focus = cs.Multiview, cs.Focus

@@ -40,6 +40,7 @@ var rpcCaps = provider.Capabilities{
 	Playback:    provider.Verified,
 	DeviceTime:  provider.Verified,
 	StorageInfo: provider.Verified,
+	Config:      provider.Experimental,
 }
 
 var nativeCaps = provider.Capabilities{

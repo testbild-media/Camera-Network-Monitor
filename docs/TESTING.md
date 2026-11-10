@@ -54,6 +54,21 @@ scripts/test-display.sh path/to/linux/cnm   # wall displays against a real (head
   (`hikvision.*`, `axis.*`, `uniview.*`, `generic.*`, `rtsp.*`).
 - A wrong password is tried once and never again
   (`device.TestAuthFailureIsNotRetried` and per-protocol tests).
+- Device settings: reading, changing only what differs, values the device
+  clamps (warning) or refuses (error), recording schedules with time windows
+  across midnight, clock and restart – for Dahua RPC2 and Sofia/DVRIP
+  (`dahua.TestDahua*`, `sofia.TestSofia*`,
+  `server.TestDeviceSettingsAPI`, admins only).
+- Reolink: HTTPS/HTTP detection with a single rejected login at most,
+  switching RTSP/RTMP on, dual-lens cameras, live addresses, search day by
+  day, the tele lens addressed both ways, HTTP-FLV playback across file
+  ends with both kinds of timestamps after a seek, H.265 in FLV, PTZ
+  commands (`reolink.*`).
+- PTZ control: taking over pauses tracking and postpones the guard return,
+  one control per head (both lenses), forced takeover, the end of a control
+  without input, a move that is not renewed stops, restore after a restart
+  and while the camera is offline, a refused return time
+  (`ptz.*`, `server.TestPTZAPI`; kiosk sessions never steer).
 - Network search: parsers for ONVIF, DVRIP, Dahua, SADP and SSDP replies,
   merging per address, suggestions resolve to existing protocols, address
   ranges (`discovery.*`).

@@ -48,6 +48,7 @@ func (prov) Info() provider.Info {
 				Playback:    provider.Verified,
 				DeviceTime:  provider.Experimental,
 				StorageInfo: provider.Experimental,
+				Config:      provider.Experimental,
 			},
 			Auth: "DVRIP-Login (Sofia-MD5)",
 			Notes: "Kanalzahl und Live-Übertragung (Single-/Two-Socket) erkennt CNM beim Verbinden selbst. " +
@@ -71,6 +72,7 @@ type driver struct {
 	ctl      *Control
 	detected string // detected live transport ("" = not yet)
 	clock    provider.Clock
+	caps     map[string]any // EncodeCapability (device settings), read once
 }
 
 func (d *driver) port() int { return d.cfg.Port("native") }

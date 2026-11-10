@@ -258,6 +258,8 @@ function buildShell() {
   const chip = h('span', { class: 'chip clickable', title: '' }, h('span', { class: 'dot' }), h('span', { class: 'txt' }, 'Media …'));
   chip.addEventListener('click', showMediaDetails);
   const settingsBtn = h('button', { class: 'btn ghost', hidden: !store.isAdmin(), onclick: () => { location.hash = settingsRoute() ? '' : '#/settings'; } }, 'Einstellungen');
+  // recorders with problems (recorder check): admins only
+  const recChip = h('span', { class: 'chip clickable warn', hidden: true, onclick: () => { location.hash = '#/settings/devices'; } }, h('span', { class: 'dot' }), h('span', { class: 'txt' }, ''));
   const p = store.principal || {};
   const userBox = h('div', { class: 'usermenu' },
     h('button', { class: 'btn ghost small hide-sm', title: 'Mein Konto – Startbildschirm', onclick: openAccount }, p.username || ''),
@@ -267,12 +269,30 @@ function buildShell() {
     h('div', { class: 'brand' }, h('img', { src: '/assets/logo.svg', alt: '' }), title),
     monitorSel,
     h('span', { class: 'spacer' }),
+    recChip,
     chip,
     settingsBtn,
     userBox,
   );
   app.append(bar, content);
-  return { content, monitorSel, chip, settingsBtn, title };
+  return { content, monitorSel, chip, recChip, settingsBtn, title };
+}
+
+// recorders whose last check found problems
+function updateRecorderChip() {
+  if (!shell || !shell.recChip) return;
+  const bad = [...store.devices.values()].filter((st) => st.monitor && st.monitor.problems && st.monitor.problems.length);
+  shell.recChip.hidden = !store.isAdmin() || !bad.length;
+  shell.recChip.querySelector('.txt').textContent = bad.length === 1 ? '1 Rekorder mit Problemen' : `${bad.length} Rekorder mit Problemen`;
+  shell.recChip.title = bad.map((st) => `${st.label || 'Rekorder'}: ${st.monitor.problems.join(' · ')}`).join('\n');
+}
+
+async function loadDeviceStatuses() {
+  if (!store.isAdmin()) return;
+  try {
+    const r = await api.get('/api/settings/devices/status');
+    for (const st of r.devices || []) store.setDevice(st);
+  } catch { /* the chip stays hidden */ }
 }
 
 function updateChip() {
@@ -397,6 +417,8 @@ function startApp(me) {
   });
   unsubs.push(store.on('state', () => { renderShellState(); renderMonitor(); }));
   unsubs.push(store.on('media', updateChip));
+  unsubs.push(store.on('device', updateRecorderChip));
+  loadDeviceStatuses();
   unsubs.push(store.on('identify', showIdentify));
   api.onUnauthorized = () => { if (control) control.cb.onRevoked(); };
   control = new Control({

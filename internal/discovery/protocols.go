@@ -89,6 +89,8 @@ func protocolOf(s string) string {
 		return protoAxis
 	case strings.Contains(l, "uniview"), strings.HasPrefix(strings.TrimSpace(l), "unv"):
 		return protoUniview
+	case strings.Contains(l, "reolink"), strings.Contains(l, "rlc-"), strings.Contains(l, "rln"), strings.Contains(l, "trackmix"):
+		return protoReolink
 	}
 	return ""
 }
@@ -147,7 +149,8 @@ func parseONVIF(src netip.Addr, b []byte) *Device {
 	case protoDahua:
 		d.Suggestion = &Suggestion{Protocol: proto, Ports: nonDefault(map[string]int{"http": port}, 80)}
 		d.rank = 2
-	case protoUniview:
+	case protoUniview, protoReolink:
+		// the API port is not the ONVIF port: factory ports
 		d.Suggestion = &Suggestion{Protocol: proto}
 		d.rank = 2
 	default:
@@ -401,7 +404,7 @@ func AllSuggestions() []*Suggestion {
 			out = append(out, d.Suggestion)
 		}
 	}
-	for _, xml := range []string{"name/HIKVISION", "name/Dahua", "name/Generic", "type/NetworkVideoRecorder", "name/AXIS", "name/UNIVIEW", "name/OTHER"} {
+	for _, xml := range []string{"name/HIKVISION", "name/Dahua", "name/Generic", "type/NetworkVideoRecorder", "name/AXIS", "name/UNIVIEW", "name/Reolink", "name/OTHER"} {
 		d := parseONVIF(ip, []byte(`<d:ProbeMatch><d:Scopes>onvif://www.onvif.org/`+xml+`</d:Scopes><d:XAddrs>http://192.0.2.1:8080/onvif/device_service</d:XAddrs></d:ProbeMatch>`))
 		out = append(out, d.Suggestion)
 	}

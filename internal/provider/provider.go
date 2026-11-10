@@ -258,6 +258,9 @@ type DeviceInfo struct {
 	Channels     int               `json:"channels,omitempty"`
 	ChannelNames map[int]string    `json:"channelNames,omitempty"`
 	Extra        map[string]string `json:"extra,omitempty"`
+	// PTZ maps the camera channels that can be steered to the mechanical
+	// head that moves them (channels of one head are steered together).
+	PTZ map[int]int `json:"ptz,omitempty"`
 }
 
 // StorageState of recording storage.

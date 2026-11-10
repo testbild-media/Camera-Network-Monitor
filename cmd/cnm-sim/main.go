@@ -9,6 +9,7 @@
 //	ONVIF recorder:      SOAP on --onvif-http, RTSP on --onvif-rtsp (4 channels, Profile G)
 //	Axis camera:         VAPIX on --axis-http, RTSP on --axis-rtsp (2 sources, edge storage)
 //	Uniview NVR:         RTSP on --uniview-rtsp (4 channels)
+//	Reolink camera:      HTTPS API on --reolink-http, RTSP on --reolink-rtsp (dual lens, PTZ, SD card)
 //	Network search:      answers Dahua DHIP, ONVIF WS-Discovery and Axis SSDP (--discovery)
 //
 // All devices accept the user "admin" (Axis: "root") with --password. Video is a generated
@@ -73,7 +74,10 @@ func main() {
 	axisHTTP := flag.String("axis-http", "127.0.0.1:18082", "Axis VAPIX listen address ('' = off)")
 	axisRTSP := flag.String("axis-rtsp", "127.0.0.1:18567", "Axis RTSP listen address")
 	unvRTSP := flag.String("uniview-rtsp", "127.0.0.1:18566", "Uniview NVR RTSP listen address ('' = off)")
+	reoHTTP := flag.String("reolink-http", "127.0.0.1:18443", "Reolink camera HTTPS API listen address ('' = off)")
+	reoRTSP := flag.String("reolink-rtsp", "127.0.0.1:18568", "Reolink camera RTSP listen address")
 	disc := flag.Bool("discovery", true, "answer Dahua DHIP, ONVIF WS-Discovery and Axis SSDP searches")
+	diskErr := flag.Bool("sofia-disk-error", false, "DVRIP modern: the disk reports an error status until it is formatted")
 	stall := flag.String("dahua-stall", "", "Dahua live streams that connect but send no video, e.g. \"3:sub,4:main\" (fallback tests)")
 	flag.Parse()
 
@@ -144,6 +148,9 @@ func main() {
 		s := &sim.SofiaServer{User: "admin", Pass: *pass, Legacy: x.legacy, Channels: 4, ChunkSize: 4096, Clip: clip}
 		if err := s.Listen(x.addr); err != nil {
 			log.Fatal(err)
+		}
+		if *diskErr && !x.legacy {
+			s.SetDiskError(true)
 		}
 		mode := "modern"
 		if x.legacy {
@@ -242,6 +249,28 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Printf("Uniview NVR sim: rtsp=%s (4 channels, recordings: 10 of every 15 minutes)\n", r.Addr())
+	}
+	if *reoHTTP != "" {
+		r := &sim.RTSPServer{User: "admin", Pass: *pass, Route: sim.ReolinkRoute,
+			Clip: func(ch, sub int) *sim.Clip {
+				if ch < 1 || ch > 2 {
+					return nil
+				}
+				return clip(ch+3, sub == 0)
+			}}
+		if err := r.Listen(*reoRTSP); err != nil {
+			log.Fatal(err)
+		}
+		_, port, _ := strings.Cut(r.Addr(), ":")
+		var rtspPort int
+		fmt.Sscan(port, &rtspPort)
+		// dual lens with PTZ; RTSP/RTMP switched off like on new cameras (CNM switches them on)
+		s := &sim.ReolinkServer{User: "admin", Pass: *pass, DualLens: true, PTZ: true, RTSPOff: true, RTSPPort: rtspPort,
+			Clip: func(ch int, main bool) *sim.Clip { return clip(ch+4, main) }}
+		if err := s.Listen(*reoHTTP); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Reolink camera sim: https=%s rtsp=%s (wide angle + tele, PTZ, SD recordings: 10 of every 15 minutes)\n", s.Addr(), r.Addr())
 	}
 	if *disc {
 		r := &sim.DiscoveryResponder{DahuaHTTP: 18008, ONVIFPort: 8899}

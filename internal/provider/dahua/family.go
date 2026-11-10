@@ -252,3 +252,67 @@ func (d *familyDriver) Test(ctx context.Context) (*provider.TestResult, error) {
 	d.Close()
 	return res, nil
 }
+
+// ---- device settings (RPC2 only) ----------------------------------------------------------------
+
+func (d *familyDriver) configurator() (provider.Configurator, error) {
+	if c, ok := d.current().(provider.Configurator); ok {
+		return c, nil
+	}
+	return nil, provider.NewError(provider.KindUnsupported, nil, "Geräteeinstellungen gibt es nur bei Dahua-Geräten mit RPC2")
+}
+
+func (d *familyDriver) ReadSettings(ctx context.Context) (*provider.DeviceSettings, error) {
+	c, err := d.configurator()
+	if err != nil {
+		return nil, err
+	}
+	return c.ReadSettings(ctx)
+}
+
+func (d *familyDriver) ApplySettings(ctx context.Context, change provider.SettingsChange) (*provider.SettingsResult, error) {
+	c, err := d.configurator()
+	if err != nil {
+		return nil, err
+	}
+	return c.ApplySettings(ctx, change)
+}
+
+func (d *familyDriver) SetDeviceTime(ctx context.Context, wall time.Time) error {
+	c, err := d.configurator()
+	if err != nil {
+		return err
+	}
+	return c.SetDeviceTime(ctx, wall)
+}
+
+func (d *familyDriver) userManager() (provider.UserManager, error) {
+	if u, ok := d.current().(provider.UserManager); ok {
+		return u, nil
+	}
+	return nil, provider.NewError(provider.KindUnsupported, nil, "Benutzer gibt es nur bei Dahua-Geräten mit RPC2")
+}
+
+func (d *familyDriver) Users(ctx context.Context) ([]provider.DeviceUser, error) {
+	u, err := d.userManager()
+	if err != nil {
+		return nil, err
+	}
+	return u.Users(ctx)
+}
+
+func (d *familyDriver) ChangePassword(ctx context.Context, user, oldPass, newPass string) error {
+	u, err := d.userManager()
+	if err != nil {
+		return err
+	}
+	return u.ChangePassword(ctx, user, oldPass, newPass)
+}
+
+func (d *familyDriver) Reboot(ctx context.Context) error {
+	c, err := d.configurator()
+	if err != nil {
+		return err
+	}
+	return c.Reboot(ctx)
+}

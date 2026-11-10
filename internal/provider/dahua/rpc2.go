@@ -76,8 +76,24 @@ type rpcClient struct {
 
 	mu      sync.Mutex
 	session json.RawMessage // string or number, echoed verbatim
-	loginMu sync.Mutex      // serialises (re-)logins
+	realm   string          // of the last login (password changes)
+	enc     string
+	loginMu sync.Mutex // serialises (re-)logins
 	id      atomic.Int64
+}
+
+// scheme returns the encryption and realm of the last login.
+func (c *rpcClient) scheme() (enc, realm string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.enc, c.realm
+}
+
+// clone is a separate client for the same device (a check login).
+func (c *rpcClient) clone(user, pass string, env provider.Env) *rpcClient {
+	n := newRPCClient(c.host, 0, user, pass, "", env)
+	n.base, n.prof = c.base, c.prof
+	return n
 }
 
 type rpcRequest struct {
@@ -121,10 +137,13 @@ var errSession = errors.New("rpc2: session invalid")
 
 func newRPCClient(host string, port int, user, pass, variant string, env provider.Env) *rpcClient {
 	tr := &http.Transport{
-		Proxy:                 nil, // DVRs are local; never route through a proxy
-		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		MaxIdleConnsPerHost:   2,
-		IdleConnTimeout:       60 * time.Second,
+		Proxy:               nil, // DVRs are local; never route through a proxy
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		MaxIdleConnsPerHost: 2,
+		// Recorders drop idle keep-alive connections early and silently; a
+		// reused dead connection looked like a lost device. Reuse only within
+		// short bursts (the health check runs every 30 s on a fresh one).
+		IdleConnTimeout:       10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 		DisableCompression:    true,
 	}
@@ -152,6 +171,12 @@ func (c *rpcClient) post(ctx context.Context, path string, req *rpcRequest) (*rp
 		return nil, err
 	}
 	c.setHeaders(hr, req.Session)
+	if path != "/RPC2_Login" {
+		// let net/http repeat the request once on a fresh connection when a
+		// reused one turns out to be dead (the header itself is not sent);
+		// never for logins, so a refused login is not counted twice
+		hr.Header["X-Idempotency-Key"] = nil
+	}
 	resp, err := c.hc.Do(hr)
 	if err != nil {
 		return nil, provider.ClassifyNetErr(err, "RPC2")
@@ -319,6 +344,9 @@ func (c *rpcClient) login(ctx context.Context) error {
 		sess = r1.Session
 	}
 	c.setSession(sess)
+	c.mu.Lock()
+	c.realm, c.enc = ch.Realm, enc
+	c.mu.Unlock()
 	return nil
 }
 

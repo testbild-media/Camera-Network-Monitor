@@ -35,6 +35,7 @@ const (
 // Status is the observable runtime state of a device (admin only).
 type Status struct {
 	ID            string               `json:"id"`
+	Label         string               `json:"label,omitempty"`
 	State         State                `json:"state"`
 	Since         time.Time            `json:"since"`
 	Error         string               `json:"error,omitempty"`
@@ -47,6 +48,8 @@ type Status struct {
 	ClockOffsetMs *int64               `json:"clockOffsetMs,omitempty"`
 	LiveMode      string               `json:"liveMode,omitempty"`
 	Degraded      string               `json:"degraded,omitempty"`
+	// Monitor is the last recorder check (kept while disconnected).
+	Monitor *MonitorResult `json:"monitor,omitempty"`
 }
 
 // Online reports whether the control connection is usable.

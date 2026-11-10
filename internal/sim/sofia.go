@@ -33,6 +33,16 @@ type SofiaServer struct {
 	// NoDisk reports no recording storage (an empty list; NullDisk: null).
 	NoDisk   bool
 	NullDisk bool
+	log      []map[string]any // event log, oldest first (nil = three entries); SetLog
+	// diskError: the partition reports an error status and old recordings
+	// until it is formatted (SetDiskError)
+	diskError bool
+	Formats   atomic.Int32
+	// passHash replaces the password after a change; RefuseNewPassword makes
+	// logins with a changed password fail (check login, restore)
+	passHash          string
+	RefuseNewPassword bool
+	PasswordChanges   atomic.Int32
 
 	ln           net.Listener
 	Logins       atomic.Int32
@@ -43,6 +53,11 @@ type SofiaServer struct {
 	nextSess uint32
 	sessions map[uint32]*sofiaSession
 	conns    map[net.Conn]struct{}
+
+	config       map[string]any // see sofia_config.go
+	clockOffset  time.Duration
+	ConfigWrites atomic.Int32
+	Reboots      atomic.Int32
 }
 
 type sofiaSession struct {
@@ -113,6 +128,7 @@ func (s *SofiaServer) Listen(addr string) error {
 	s.sessions = map[uint32]*sofiaSession{}
 	s.conns = map[net.Conn]struct{}{}
 	s.nextSess = 0x10
+	s.initConfig()
 	if s.ChunkSize == 0 {
 		s.ChunkSize = 8192
 	}
@@ -196,7 +212,7 @@ func (s *SofiaServer) serve(c net.Conn) {
 		json.Unmarshal([]byte(strings.TrimRight(string(payload), "\x00\n")), &cmd)
 		switch msg {
 		case 1000: // login
-			if cmd["UserName"] != s.User || cmd["PassWord"] != sofiaHash(s.Pass) {
+			if cmd["UserName"] != s.User || cmd["PassWord"] != s.loginHash() || s.refuseLogin(cmd["PassWord"]) {
 				s.FailedLogins.Add(1)
 				write(packet(0, 0, 1001, jsonP(map[string]any{"Ret": 203, "SessionID": "0x00000000"})))
 				continue
@@ -215,7 +231,16 @@ func (s *SofiaServer) serve(c net.Conn) {
 			if cmd["Name"] == "StorageInfo" {
 				disks := []any{}
 				if !s.NoDisk {
-					disks = append(disks, map[string]any{"PlysicalNo": 0, "PartNumber": 1, "Partition": []any{map[string]any{"TotalSpace": "0x000E8E0D", "RemainSpace": "0x00001000", "IsCurrent": true}}})
+					part := map[string]any{"TotalSpace": "0x000E8E0D", "RemainSpace": "0x00001000", "IsCurrent": true,
+						"DirverType": 0, "Status": 0, "OldStartTime": "2026-01-02 03:04:05", "NewEndTime": "2026-01-09 10:11:12"}
+					s.mu.Lock()
+					if s.diskError {
+						part["Status"], part["OldStartTime"], part["NewEndTime"] = 15, "2022-08-20 00:57:11", "2022-08-29 23:29:25"
+					} else if s.Formats.Load() > 0 {
+						part["OldStartTime"], part["NewEndTime"] = "2000-00-00 00:00:00", "0000-00-00 00:00:00" // empty disk
+					}
+					s.mu.Unlock()
+					disks = append(disks, map[string]any{"PlysicalNo": 0, "PartNumber": 1, "Partition": []any{part}})
 				}
 				var answer any = disks
 				if s.NoDisk && s.NullDisk {
@@ -225,8 +250,118 @@ func (s *SofiaServer) serve(c net.Conn) {
 				continue
 			}
 			write(packet(session, 0, 1021, jsonP(map[string]any{"Ret": 100, "Name": "SystemInfo", "SystemInfo": map[string]any{"DeviceModel": "SIM-DVRIP", "SerialNo": "SIMSOFIA1", "SoftWareVersion": "V4.02.SIM", "VideoInChannel": s.Channels}})))
+		case 1442: // OPLogQuery: 128 entries per answer from LogPosition
+			q, _ := cmd["OPLogQuery"].(map[string]any)
+			from, _ := time.Parse(dvripTimeFmt, fmt.Sprint(q["BeginTime"]))
+			to, _ := time.Parse(dvripTimeFmt, fmt.Sprint(q["EndTime"]))
+			s.mu.Lock()
+			log := s.log
+			s.mu.Unlock()
+			if log == nil {
+				log = []map[string]any{
+					{"Time": "2026-01-01 08:00:00", "Type": "SaveSystemState", "Data": "", "User": "System"},
+					{"Time": "2026-01-02 09:00:00", "Type": "StorageDeviceError", "Data": "0", "User": "System"},
+					{"Time": "2026-01-03 10:00:00", "Type": "Reboot", "Data": "", "User": "admin"},
+				}
+			}
+			want := map[string]string{"LogStorage": "Storage", "LogSystem": "System"}[fmt.Sprint(q["Type"])]
+			var page []any
+			for i := int(toF(q["LogPosition"])); i < len(log) && len(page) < 128; i++ {
+				t, err := time.Parse(dvripTimeFmt, fmt.Sprint(log[i]["Time"]))
+				if err != nil || t.Before(from) || t.After(to) || !strings.Contains(fmt.Sprint(log[i]["Type"]), want) {
+					continue
+				}
+				e := map[string]any{"Position": i}
+				for k, v := range log[i] {
+					e[k] = v
+				}
+				page = append(page, e)
+			}
+			write(packet(session, 0, 1443, jsonP(map[string]any{"Ret": 100, "Name": "OPLogQuery", "OPLogQuery": page})))
+		case 1460: // OPStorageManager
+			q, _ := cmd["OPStorageManager"].(map[string]any)
+			ret := 100
+			switch {
+			case s.NoDisk:
+				ret = 607
+			case fmt.Sprint(q["Action"]) != "Clear" || toF(q["SerialNo"]) != 0 || toF(q["PartNo"]) != 0 || fmt.Sprint(q["Type"]) != "Data":
+				ret = 606
+			default:
+				s.mu.Lock()
+				s.diskError = false
+				s.mu.Unlock()
+				s.Formats.Add(1)
+			}
+			write(packet(session, 0, 1461, jsonP(map[string]any{"Ret": ret, "Name": "OPStorageManager"})))
+		case 1472: // Users
+			write(packet(session, 0, 1473, jsonP(map[string]any{"Ret": 100, "Name": "Users", "Users": []any{
+				map[string]any{"Name": s.User, "Group": "admin", "Reserved": true, "Sharable": true},
+				map[string]any{"Name": "default", "Group": "user", "Reserved": true, "Sharable": true},
+			}})))
+		case 1488: // ModifyPassword: the old hash must match
+			ret := 100
+			s.mu.Lock()
+			switch {
+			case cmd["UserName"] != s.User:
+				ret = 113
+			case cmd["PassWord"] != s.loginHashLocked():
+				ret = 203
+			default:
+				s.passHash = fmt.Sprint(cmd["NewPassWord"])
+			}
+			s.mu.Unlock()
+			s.PasswordChanges.Add(1)
+			write(packet(session, 0, 1489, jsonP(map[string]any{"Ret": ret, "Name": "ModifyPassword"})))
 		case 1452: // OPTimeQuery
-			write(packet(session, 0, 1453, jsonP(map[string]any{"Ret": 100, "Name": "OPTimeQuery", "OPTimeQuery": DeviceNow().Format(dvripTimeFmt)})))
+			s.mu.Lock()
+			now := s.sofiaNow()
+			s.mu.Unlock()
+			write(packet(session, 0, 1453, jsonP(map[string]any{"Ret": 100, "Name": "OPTimeQuery", "OPTimeQuery": now.Format(dvripTimeFmt)})))
+		case 1042: // CONFIG_GET
+			name, _ := cmd["Name"].(string)
+			s.mu.Lock()
+			v, ok := s.getConfig(name)
+			s.mu.Unlock()
+			if !ok {
+				write(packet(session, 0, 1043, jsonP(map[string]any{"Ret": 607, "Name": ""})))
+				continue
+			}
+			write(packet(session, 0, 1043, jsonP(map[string]any{"Ret": 100, "Name": name, name: v})))
+		case 1040: // CONFIG_SET
+			name, _ := cmd["Name"].(string)
+			s.mu.Lock()
+			ret := s.setConfig(name, cmd[name])
+			s.mu.Unlock()
+			write(packet(session, 0, 1041, jsonP(map[string]any{"Ret": ret, "Name": name})))
+		case 1046: // ChannelTitle set
+			s.mu.Lock()
+			ret := s.setConfig("ChannelTitle", cmd["ChannelTitle"])
+			s.mu.Unlock()
+			write(packet(session, 0, 1047, jsonP(map[string]any{"Ret": ret, "Name": "ChannelTitle"})))
+		case 1360: // ability
+			if cmd["Name"] == "EncodeCapability" {
+				write(packet(session, 0, 1361, jsonP(map[string]any{"Ret": 100, "Name": "EncodeCapability", "EncodeCapability": s.encodeCapability()})))
+				continue
+			}
+			write(packet(session, 0, 1361, jsonP(map[string]any{"Ret": 607, "Name": ""})))
+		case 1450: // OPTimeSetting / OPMachine
+			switch cmd["Name"] {
+			case "OPTimeSetting":
+				t, err := time.Parse(dvripTimeFmt, fmt.Sprint(cmd["OPTimeSetting"]))
+				if err != nil {
+					write(packet(session, 0, 1451, jsonP(map[string]any{"Ret": 609, "Name": "OPTimeSetting"})))
+					continue
+				}
+				s.mu.Lock()
+				s.clockOffset = t.Sub(DeviceNow())
+				s.mu.Unlock()
+				write(packet(session, 0, 1451, jsonP(map[string]any{"Ret": 100, "Name": "OPTimeSetting"})))
+			case "OPMachine":
+				s.Reboots.Add(1)
+				write(packet(session, 0, 1451, jsonP(map[string]any{"Ret": 100, "Name": "OPMachine"})))
+			default:
+				write(packet(session, 0, 1451, jsonP(map[string]any{"Ret": 607, "Name": ""})))
+			}
 		case 1440: // OPFileQuery
 			q, _ := cmd["OPFileQuery"].(map[string]any)
 			from, e1 := time.Parse(dvripTimeFmt, fmt.Sprint(q["BeginTime"]))
@@ -312,10 +447,9 @@ func (s *SofiaServer) serve(c net.Conn) {
 			}
 			go s.download(clip, session, *file, from, media, stop)
 		case 1048:
-			var titles []string
-			for i := 0; i < s.Channels; i++ {
-				titles = append(titles, fmt.Sprintf("XM CAM %d", i+1))
-			}
+			s.mu.Lock()
+			titles, _ := s.getConfig("ChannelTitle")
+			s.mu.Unlock()
 			write(packet(session, 0, 1049, jsonP(map[string]any{"Ret": 100, "ChannelTitle": titles})))
 		case 1413: // claim
 			op, _ := cmd["OPMonitor"].(map[string]any)
@@ -518,4 +652,39 @@ func (s *SofiaServer) stream(clip *Clip, session uint32, write func([]byte) erro
 		case <-time.After(time.Until(next)):
 		}
 	}
+}
+
+// SetLog replaces the simulated event log (oldest first).
+func (s *SofiaServer) SetLog(l []map[string]any) {
+	s.mu.Lock()
+	s.log = l
+	s.mu.Unlock()
+}
+
+// SetDiskError makes the partition report an error status until it is
+// formatted.
+func (s *SofiaServer) SetDiskError(b bool) {
+	s.mu.Lock()
+	s.diskError = b
+	s.mu.Unlock()
+}
+
+func (s *SofiaServer) loginHash() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loginHashLocked()
+}
+
+func (s *SofiaServer) loginHashLocked() string {
+	if s.passHash != "" {
+		return s.passHash
+	}
+	return sofiaHash(s.Pass)
+}
+
+// refuseLogin: with RefuseNewPassword, a changed password does not log in.
+func (s *SofiaServer) refuseLogin(hash any) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.RefuseNewPassword && s.passHash != "" && hash == s.passHash && s.passHash != sofiaHash(s.Pass)
 }

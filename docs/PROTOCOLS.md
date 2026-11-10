@@ -28,6 +28,7 @@ change, CNM detects again.
 | Hikvision recorder or camera | **Hikvision** |
 | Axis camera or video encoder | **Axis** |
 | Uniview recorder or camera | **Uniview** |
+| Reolink camera or recorder | **Reolink** |
 | Any other device with ONVIF support | **ONVIF** |
 | A device that only offers a stream address | **RTSP**, **RTMP**, **HTTP** or **TCP** |
 
@@ -46,6 +47,7 @@ a protocol for every device it finds.
 | Hikvision (ISAPI) | experimental | experimental | experimental | experimental | experimental |
 | Axis (VAPIX) | experimental | experimental | experimental | experimental | experimental |
 | Uniview (RTSP) | experimental | – (availability check) | experimental | – | experimental |
+| Reolink | experimental | experimental | experimental | experimental | experimental (via ONVIF) |
 | ONVIF (Profile S/G) | yes | experimental (time span only) | experimental | experimental | experimental |
 | RTSP / RTMP / HTTP / TCP | yes | – | – | – | port check (address range) |
 
@@ -59,8 +61,15 @@ What the levels mean:
 
 The device dialog shows these levels under *Funktionen dieses Protokolls*.
 After detection, the levels of the detected variant apply (the native Dahua
-protocol, for example, reports no device time). PTZ control, device
-configuration and events are not offered for any device at the moment.
+protocol, for example, reports no device time). Device settings (encoding,
+channel names, time, recording, motion detection, alarms, system, users and
+passwords, recorder monitoring) are offered for Dahua with RPC2 and for
+Sofia/DVRIP (*experimental*); the recorder log, disk formatting and the
+maintenance restart only for Sofia/DVRIP. Passwords are changed on Dahua
+recorders only when they log in with the "Default" method. PTZ control
+(pan, tilt, zoom, stored positions, with a pause of the camera's own
+tracking while a user steers) is offered for Reolink cameras
+(*experimental*). Events are not offered for any device at the moment.
 
 If you use a device with an *experimental* protocol, feedback is very
 welcome: which protocol and variant were detected, the firmware version,
@@ -125,6 +134,29 @@ and what works.
 - There is no recording list: CNM asks the recorder via RTSP whether a time
   range contains material and plays it back the same way. Devices with
   ONVIF Profile G can alternatively be added as *ONVIF*.
+
+### Reolink
+
+- **Login:** the camera's JSON API (`/cgi-bin/api.cgi`) with a login token,
+  over HTTPS (port 443, the camera's own certificate) or – when HTTPS does
+  not answer – HTTP (port 80). The working combination is stored. A
+  rejected login stops automatic retries (the cameras lock the account
+  after a few failures).
+- **RTSP and RTMP** are switched off on new cameras. CNM switches them on
+  when it connects (RTSP for live video, RTMP for playback) and says so in
+  the device list.
+- **Channels:** a camera has one channel; a dual-lens camera (wide angle
+  and tele on one motorised head) gets two cameras, *Weitwinkel* and
+  *Tele*; a recorder one per channel.
+- **Recordings** on the SD card (or the recorder's disk) are searched day
+  by day and played back over HTTP-FLV, file after file; CNM measures the
+  camera clock and converts.
+- **PTZ:** pan, tilt, zoom, stored positions, the guard ("fixed") position
+  and the camera's tracking – see the user guide. Stored positions are
+  created in the camera's app; administrators can store the fixed position
+  in CNM.
+- Implemented from public descriptions of the API (there is no official
+  documentation) and tested against the simulator only.
 
 ### ONVIF (Profile S/G)
 
@@ -192,6 +224,7 @@ and also checks TCP ports 80, 554, 8000, 34567 and 37777.
 | Hikvision | HTTP 80, RTSP 554 |
 | Axis | HTTP 80, RTSP 554 |
 | Uniview | RTSP 554 |
+| Reolink | HTTPS 443 (or HTTP 80), RTSP 554 |
 | ONVIF | HTTP 80 |
 
 Different ports go under *Erweitert* in the device dialog.

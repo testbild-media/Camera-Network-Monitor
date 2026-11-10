@@ -10,6 +10,15 @@ import { codecHint } from './player.js';
 import { applyAspect, applyFit } from './multiview.js';
 import { openPicker, PlaybackSession, Timeline } from './playback.js';
 import { snapToRecording } from './timeline.js';
+import { PTZPanel } from './ptz.js';
+
+const PTZ_KEY = 'cnm.ptzPanel';
+function ptzWanted() {
+  try { return localStorage.getItem(PTZ_KEY) !== 'off'; } catch { return true; }
+}
+function setPtzWanted(on) {
+  try { localStorage.setItem(PTZ_KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
+}
 
 let current = null;
 
@@ -44,12 +53,14 @@ class FocusView {
     this.altNote = h('span', { class: 'alt-note', hidden: true, title: 'Der Mainstream liefert kein Bild – angezeigt wird der Substream' }, 'Substream');
     this.liveBtn = h('button', { class: 'btn active', onclick: () => this.showLive() }, 'Live');
     this.pbBtn = h('button', { class: 'btn', onclick: () => this.pickPlayback() }, 'Playback');
+    this.ptzBtn = h('button', { class: 'btn ptz-toggle', hidden: true, title: 'Kamera schwenken, neigen und zoomen', onclick: () => this.togglePTZ() }, 'PTZ');
     this.body = h('div', { class: 'focus-body' });
     this.el = h('div', { class: 'focus', role: 'dialog', 'aria-label': 'Kameraansicht' },
       h('div', { class: 'focus-head' },
         this.title,
         this.altNote,
         h('span', { class: 'spacer' }),
+        this.ptzBtn,
         h('div', { class: 'seg' }, this.liveBtn, this.pbBtn),
         h('button', { class: 'btn', onclick: () => this.close() }, 'Schließen'),
       ),
@@ -65,6 +76,8 @@ class FocusView {
     this.cam = cam;
     this.title.textContent = store.cameraName(cam.id, this.slotLabel);
     this.pbBtn.hidden = !cam.playback;
+    this.ptzBtn.hidden = !cam.ptz || this.mode !== 'live';
+    if (!cam.ptz && this.ptz) { this.ptz.destroy(); this.ptz = null; }
     if (this.mode === 'live' && this.slot && (this.slot.primary !== cam.focus || this.slot.alternate !== (cam.focusAlt || ''))) this.showLive();
   }
 
@@ -74,6 +87,8 @@ class FocusView {
     if (this.session) { this.session.destroy(); this.session = null; }
     if (this.timeline) { this.timeline.destroy(); this.timeline = null; }
     if (this.keyHandler) { document.removeEventListener('keydown', this.keyHandler); this.keyHandler = null; }
+    if (this.ptz) { this.ptz.destroy(); this.ptz = null; }
+    this.ptzBtn.classList.remove('active');
     clear(this.body);
     const tl = this.el.querySelector('.timeline');
     if (tl) tl.remove();
@@ -113,6 +128,27 @@ class FocusView {
       },
     });
     if (this.suspended) this.slot.suspend();
+    this.ptzBtn.hidden = !this.cam.ptz;
+    if (this.cam.ptz && ptzWanted()) this.showPTZ();
+  }
+
+  showPTZ() {
+    if (this.ptz || this.mode !== 'live') return;
+    this.ptz = new PTZPanel(this.cam.id);
+    this.body.appendChild(this.ptz.el);
+    this.ptzBtn.classList.add('active');
+  }
+
+  togglePTZ() {
+    if (this.ptz) {
+      this.ptz.destroy();
+      this.ptz = null;
+      this.ptzBtn.classList.remove('active');
+      setPtzWanted(false);
+    } else {
+      setPtzWanted(true);
+      this.showPTZ();
+    }
   }
 
   pickPlayback() {
@@ -122,6 +158,7 @@ class FocusView {
 
   showPlayback(sel) {
     this.mode = 'playback';
+    this.ptzBtn.hidden = true;
     this.pbBtn.classList.add('active');
     this.liveBtn.classList.remove('active');
     this._clearBody();

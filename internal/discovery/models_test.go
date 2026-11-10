@@ -11,6 +11,7 @@ import (
 	_ "cnm/internal/provider/dahua"
 	_ "cnm/internal/provider/generic"
 	_ "cnm/internal/provider/hikvision"
+	_ "cnm/internal/provider/reolink"
 	_ "cnm/internal/provider/sofia"
 	_ "cnm/internal/provider/uniview"
 )
@@ -52,7 +53,7 @@ func TestConfigProtocolsRegistered(t *testing.T) {
 			t.Fatalf("%s: %v", id, err)
 		}
 	}
-	if n := len(provider.Protocols()); n != 10 {
+	if n := len(provider.Protocols()); n != 11 {
 		t.Fatalf("%d protocols in the device dialog", n)
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"cnm/internal/media"
 	"cnm/internal/playback"
 	"cnm/internal/provider"
+	"cnm/internal/ptz"
 	"cnm/internal/secret"
 )
 
@@ -36,6 +37,7 @@ type Deps struct {
 	Recon    *media.Reconciler
 	Process  *media.Process
 	Playback *playback.Service
+	PTZ      *ptz.Manager      // manual PTZ control (nil = not available)
 	Displays *display.Host     // local GPU outputs (nil = not available)
 	Conns    *connreg.Registry // per session (logout / revoke)
 	Log      *slog.Logger
@@ -240,6 +242,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/playback/stream", s.handle(viewer, s.handlePlaybackStream))
 	mux.HandleFunc("GET /api/playback/download", s.handle(viewer, s.handlePlaybackDownload))
 
+	// PTZ
+	mux.HandleFunc("GET /api/cameras/{id}/ptz", s.handle(viewer, s.handlePTZ))
+	mux.HandleFunc("GET /api/cameras/{id}/ptz/status", s.handle(viewer, s.handlePTZStatus))
+	mux.HandleFunc("POST /api/cameras/{id}/ptz/control", s.handle(viewer, s.handlePTZControl))
+	mux.HandleFunc("POST /api/cameras/{id}/ptz/move", s.handle(viewer, s.handlePTZMove))
+	mux.HandleFunc("POST /api/cameras/{id}/ptz/preset", s.handle(viewer, s.handlePTZPreset))
+	mux.HandleFunc("POST /api/cameras/{id}/ptz/guard", s.handle(viewer, s.handlePTZGuard))
+
 	// metadata
 	mux.HandleFunc("GET /api/protocols", s.handle(viewer, s.handleProtocols))
 	mux.HandleFunc("GET /api/layout-templates", s.handle(viewer, s.handleTemplates))
@@ -251,6 +261,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/devices/test", s.handle(admin, s.handleTestDevice))
 	mux.HandleFunc("POST /api/settings/discovery", s.handle(admin, s.handleDiscovery))
 	mux.HandleFunc("DELETE /api/settings/devices/{id}", s.handle(admin, s.handleDeleteDevice))
+	mux.HandleFunc("GET /api/settings/devices/status", s.handle(admin, s.handleDeviceStatuses))
+	mux.HandleFunc("POST /api/settings/devices/password", s.handle(admin, s.handleDevicesPassword))
+	mux.HandleFunc("GET /api/settings/devices/{id}/users", s.handle(admin, s.handleDeviceUsers))
+	mux.HandleFunc("POST /api/settings/devices/{id}/password", s.handle(admin, s.handleDevicePassword))
+	mux.HandleFunc("POST /api/settings/devices/{id}/check", s.handle(admin, s.handleDeviceCheck))
+	mux.HandleFunc("GET /api/settings/devices/{id}/config", s.handle(admin, s.handleDeviceConfig))
+	mux.HandleFunc("PUT /api/settings/devices/{id}/config", s.handle(admin, s.handleSaveDeviceConfig))
+	mux.HandleFunc("POST /api/settings/devices/{id}/time", s.handle(admin, s.handleDeviceTime))
+	mux.HandleFunc("POST /api/settings/devices/{id}/reboot", s.handle(admin, s.handleDeviceReboot))
+	mux.HandleFunc("GET /api/settings/devices/{id}/log", s.handle(admin, s.handleDeviceLog))
+	mux.HandleFunc("POST /api/settings/devices/{id}/format", s.handle(admin, s.handleDeviceFormat))
 	mux.HandleFunc("POST /api/settings/monitors", s.handle(admin, s.handleSaveMonitor))
 	mux.HandleFunc("DELETE /api/settings/monitors/{id}", s.handle(admin, s.handleDeleteMonitor))
 	mux.HandleFunc("POST /api/settings/cameras", s.handle(admin, s.handleSaveCamera))

@@ -47,12 +47,16 @@ var (
 	// the same URL percent-encoded inside a query string (e.g. go2rtc API
 	// requests "src=rtsp%3A%2F%2Fuser%3Apass%40host")
 	encUserinfoRe = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*%3A%2F%2F)(?:[^&\s"'/%]|%[0-9a-f]{2})*?%40`)
+	// credentials in a query string (HTTP-FLV and API URLs)
+	queryCredRe = regexp.MustCompile(`(?i)([?&](?:password|pwd|token)=)[^&\s"']*`)
 )
 
-// Redact removes userinfo from URLs embedded in s – plain or percent-encoded.
-// Use it for every string that may leave the backend (logs, API error details).
+// Redact removes userinfo from URLs embedded in s – plain or percent-encoded
+// – and credentials passed as query parameters. Use it for every string that
+// may leave the backend (logs, API error details).
 func Redact(s string) string {
 	s = userinfoRe.ReplaceAllString(s, "${1}***@")
+	s = queryCredRe.ReplaceAllString(s, "${1}***")
 	return encUserinfoRe.ReplaceAllString(s, "${1}***%40")
 }
 

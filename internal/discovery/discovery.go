@@ -40,6 +40,7 @@ const (
 	protoHikvision = "hikvision"
 	protoAxis      = "axis"
 	protoUniview   = "uniview"
+	protoReolink   = "reolink"
 	protoONVIF     = "onvif"
 	protoRTSP      = "rtsp"
 )

@@ -26,6 +26,11 @@ type DahuaServer struct {
 	// SpacePadded sends times like some firmware does: padded with spaces
 	// instead of zeros ("2026-11- 4 15: 0:45").
 	SpacePadded bool
+	// ha1Set replaces the stored password form after a change;
+	// RefuseNewPassword makes logins with a changed password fail.
+	ha1Set            string
+	RefuseNewPassword bool
+	PasswordChanges   atomic.Int32
 	// NoStorageAPI answers storage.getDeviceAllInfo with "method not found".
 	NoStorageAPI bool
 	// TruthyEmpty answers searches without results with result true and an
@@ -51,6 +56,11 @@ type DahuaServer struct {
 	nextChallenge int
 	finders       map[int64]*finder
 	nextObj       int64
+
+	config       map[string]any // configManager tables (see dahua_config.go)
+	clockOffset  time.Duration
+	ConfigWrites atomic.Int32
+	Reboots      atomic.Int32
 }
 
 type finder struct {
@@ -70,6 +80,7 @@ func (d *DahuaServer) Listen(addr string) error {
 	d.ln = ln
 	d.finders = map[int64]*finder{}
 	d.nextObj = 1000
+	d.initConfig()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/RPC2_Login", d.login)
 	mux.HandleFunc("/RPC2", d.rpc)
@@ -141,7 +152,10 @@ func (d *DahuaServer) login(w http.ResponseWriter, r *http.Request) {
 	}
 	random, ok := d.challenges[id]
 	delete(d.challenges, id)
-	want := upper(p.UserName + ":" + random + ":" + upper(p.UserName+":Login to SIM:"+d.Pass))
+	want := upper(p.UserName + ":" + random + ":" + d.ha1Locked()) // d.mu is held
+	if d.RefuseNewPassword && d.ha1Set != "" && d.ha1Set != upper(d.User+":Login to SIM:"+d.Pass) {
+		want = "refused"
+	}
 	if !validClient || !ok || p.UserName != d.User || p.Password != want {
 		d.Rejected.Add(1) // every rejected second step counts towards a device lockout
 	}
@@ -185,13 +199,58 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 	switch q.Method {
 	case "global.keepAlive":
 		ok(map[string]any{"timeout": 300})
+	case "userManager.getUserInfoAll":
+		ok(map[string]any{"users": []any{
+			map[string]any{"Id": 1, "Name": d.User, "Group": "admin", "Reserved": true, "Sharable": true},
+			map[string]any{"Id": 2, "Name": "user", "Group": "user", "Reserved": false, "Sharable": true},
+		}})
+	case "userManager.modifyPassword":
+		var p struct {
+			Name   string `json:"name"`
+			Pwd    string `json:"pwd"`
+			PwdOld string `json:"pwdOld"`
+		}
+		json.Unmarshal(q.Params, &p)
+		d.PasswordChanges.Add(1)
+		d.mu.Lock()
+		cur := d.ha1Locked()
+		good := p.Name == d.User && p.PwdOld == cur && p.Pwd != ""
+		if good {
+			d.ha1Set = p.Pwd
+		}
+		d.mu.Unlock()
+		if !good {
+			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess, "error": map[string]any{"code": 268632085, "message": "Password Error"}})
+			return
+		}
+		ok(nil)
 	case "global.logout":
 		d.mu.Lock()
 		d.session = ""
 		d.mu.Unlock()
 		ok(nil)
 	case "global.getCurrentTime":
-		ok(map[string]any{"time": format(time.Now())})
+		d.mu.Lock()
+		now := d.deviceTime()
+		d.mu.Unlock()
+		ok(map[string]any{"time": format(now)})
+	case "global.setCurrentTime":
+		var p struct {
+			Time string `json:"time"`
+		}
+		json.Unmarshal(q.Params, &p)
+		t, err := time.ParseInLocation(layout, p.Time, d.Loc)
+		if err != nil {
+			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess, "error": map[string]any{"code": 268894211, "message": "Request invalid param!"}})
+			return
+		}
+		d.mu.Lock()
+		d.clockOffset = time.Until(t)
+		d.mu.Unlock()
+		ok(nil)
+	case "magicBox.reboot":
+		d.Reboots.Add(1)
+		ok(nil)
 	case "magicBox.getDeviceType":
 		ok(map[string]any{"type": "DVR-SIM"})
 	case "magicBox.getSerialNo":
@@ -199,11 +258,33 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 	case "magicBox.getSoftwareVersion":
 		ok(map[string]any{"version": map[string]any{"Version": "2.000.SIM", "BuildDate": "2026-01-01"}})
 	case "configManager.getConfig":
-		var table []map[string]any
-		for i := 0; i < d.Channels; i++ {
-			table = append(table, map[string]any{"Name": fmt.Sprintf("SIM CAM %d", i+1)})
+		var p struct {
+			Name string `json:"name"`
 		}
-		ok(map[string]any{"table": table})
+		json.Unmarshal(q.Params, &p)
+		d.mu.Lock()
+		t, known := d.config[p.Name]
+		t = configCopy(t)
+		d.mu.Unlock()
+		if !known {
+			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess, "error": map[string]any{"code": 268894210, "message": ""}})
+			return
+		}
+		ok(map[string]any{"table": t})
+	case "configManager.setConfig":
+		var p struct {
+			Name  string `json:"name"`
+			Table any    `json:"table"`
+		}
+		json.Unmarshal(q.Params, &p)
+		d.mu.Lock()
+		stored := d.setConfig(p.Name, p.Table)
+		d.mu.Unlock()
+		if !stored {
+			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess, "error": map[string]any{"code": 268894211, "message": "Request invalid param!"}})
+			return
+		}
+		ok(map[string]any{"options": []any{}})
 	case "storage.getDeviceAllInfo":
 		if d.NoStorageAPI {
 			writeJ(w, map[string]any{"id": q.ID, "result": false, "session": sess, "error": map[string]any{"code": 268894210, "message": ""}})
@@ -250,7 +331,8 @@ func (d *DahuaServer) rpc(w http.ResponseWriter, r *http.Request) {
 		if f != nil {
 			for f.pos < len(f.results) && len(infos) < p.Count {
 				r := f.results[f.pos]
-				infos = append(infos, map[string]any{"Channel": 0, "StartTime": format(r[0]), "EndTime": format(r[1]), "Type": "dav"})
+				infos = append(infos, map[string]any{"Channel": 0, "StartTime": format(r[0]), "EndTime": format(r[1]), "Type": "dav",
+					"Length": int64(r[1].Sub(r[0]).Seconds()) * 125000})
 				f.pos++
 			}
 		}
@@ -347,4 +429,12 @@ func digestOK(r *http.Request, user, pass, nonce string) bool {
 	ha2 := md5h(r.Method + ":" + p["uri"])
 	want := md5h(ha1 + ":" + p["nonce"] + ":" + p["nc"] + ":" + p["cnonce"] + ":auth:" + ha2)
 	return p["username"] == user && p["nonce"] == nonce && p["response"] == want
+}
+
+// ha1Locked is the stored password form MD5("user:realm:password") (d.mu held).
+func (d *DahuaServer) ha1Locked() string {
+	if d.ha1Set != "" {
+		return d.ha1Set
+	}
+	return upper(d.User + ":Login to SIM:" + d.Pass)
 }

@@ -1,5 +1,75 @@
 # Changelog
 
+## 1.2.0
+
+### New
+
+- **Device settings** (*Geräteeinstellungen*) for Dahua recorders with RPC2
+  and Sofia/DVRIP recorders: CNM changes settings inside the recorder with
+  its stored login – encoding per channel (codec, resolution, frame rate,
+  VBR/CBR, bitrate, quality, keyframe interval) for main and sub stream,
+  channel names, recording mode (continuous, motion, off, optionally within
+  a daily time window), motion detection and sensitivity, recorder clock and
+  time server, overwriting when the disk is full, and a restart. CNM shows
+  the disk with the period its recordings cover, warns when a recorder has
+  stopped recording, and estimates the recording time for the chosen
+  bitrates (for recorders that do not report their disk, from the size of
+  their recordings), reads the recorder's own event log and formats its
+  disk from afar (Sofia/DVRIP, confirmed with the device name),
+  lists what will be changed before saving and reports values the recorder
+  did not take over. Values outside what CNM knows for a recorder are only
+  a hint (*Trotzdem senden*); when the
+  recorder refuses an encoding, CNM explains it per channel. Several
+  channels are saved one after another, so a channel the recorder refuses
+  does not stop the others. On older DVRIP recorders CNM adapts the sub
+  stream resolution to what the recorder allows with the chosen main
+  resolution. Experimental: verified against simulators shaped after real
+  recorders and on real recorders.
+
+- **Alarms** in the device settings: video loss and tamper (camera covered)
+  per channel with buzzer and recording, the buzzer on motion, and the
+  recorder's reactions to a missing disk, a disk fault and little free
+  space.
+- **System and network** in the device settings: device name, video
+  standard (PAL/NTSC) and – Sofia/DVRIP – the automatic maintenance
+  restart; the network settings are shown (not changed).
+- **Users and passwords** of the recorders: list the accounts, change a
+  password – checked with a second login, the old password restored when
+  that fails – and set one new password for CNM's account on several
+  recorders at once; CNM takes the new password over.
+- **Recorder monitoring**: CNM checks every recorder with device settings
+  hourly – disk present and without fault, recording not stopped, every
+  channel recording around the clock has recent recordings, full disk
+  overwritten, clock right – and shows problems in the device list, in the
+  device settings and for admins in the top bar.
+- **Reolink cameras and recorders** (new protocol *Reolink*, experimental):
+  CNM finds HTTPS or HTTP itself, switches RTSP and RTMP on when they are
+  off, offers both lenses of dual-lens cameras (wide angle and tele) as
+  cameras, shows live video and plays back the recordings on the SD card.
+  The network search suggests the protocol.
+- **PTZ control** in the full-size view (Reolink cameras): pan, tilt, zoom,
+  stored positions and the fixed (guard) position. While a user steers,
+  CNM pauses the camera's own tracking and its return to the fixed
+  position; when the user ends the control – or after the return time
+  without input (default 5 minutes, per device) – the camera returns to its
+  fixed position and tracking and the return are restored exactly as they
+  were, also after a restart of CNM or when the camera was offline. One
+  user steers at a time; others see who and may take over. Administrators
+  can store the current position as the fixed position.
+
+### Improvements
+
+- The action buttons in the device list wrap on narrow screens instead of
+  widening the table.
+
+### Fixes
+
+- Dahua (RPC2): some recorders silently drop idle connections. The next
+  health check then failed and CNM reconnected the device – on affected
+  recorders up to a few hundred times a day. CNM now reuses connections only
+  briefly and repeats a request once on a fresh connection when a reused one
+  turns out to be dead (never for logins).
+
 ## 1.1.2
 
 ### Fixes

@@ -31,6 +31,8 @@ type supervisor struct {
 	drvMu sync.Mutex
 	drv   provider.Driver
 
+	monMu sync.Mutex // one recorder check at a time
+
 	authLocked atomic.Bool
 	authErr    atomic.Value // string
 
@@ -48,7 +50,7 @@ func (m *Manager) newSupervisor(d config.Device) *supervisor {
 		done:   make(chan struct{}),
 		kick:   make(chan struct{}, 1),
 	}
-	s.status = Status{ID: d.ID, State: Disconnected, Since: time.Now(), Storage: string(provider.StorageUnknown)}
+	s.status = Status{ID: d.ID, Label: d.Label, State: Disconnected, Since: time.Now(), Storage: string(provider.StorageUnknown)}
 	return s
 }
 
@@ -269,7 +271,10 @@ func (s *supervisor) run() {
 				st.LiveMode = live
 			}
 		})
+		mctx, mcancel := context.WithCancel(s.ctx)
+		go s.monitorLoop(mctx, drv)
 		manual := s.healthLoop(drv)
+		mcancel()
 		if s.ctx.Err() != nil {
 			return
 		}

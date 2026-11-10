@@ -40,6 +40,7 @@ import (
 	"cnm/internal/playback"
 	"cnm/internal/procutil"
 	"cnm/internal/provider"
+	"cnm/internal/ptz"
 	"cnm/internal/sdnotify"
 	"cnm/internal/secret"
 	"cnm/internal/server"
@@ -49,6 +50,7 @@ import (
 	_ "cnm/internal/provider/dahua"
 	_ "cnm/internal/provider/generic"
 	_ "cnm/internal/provider/hikvision"
+	_ "cnm/internal/provider/reolink"
 	_ "cnm/internal/provider/sofia"
 	_ "cnm/internal/provider/uniview"
 )
@@ -234,9 +236,10 @@ func serve(args []string) int {
 	recon := media.NewReconciler(store.Get, devices, log.With("component", "media"))
 	proc := media.NewProcess(store.Get, log.With("component", "go2rtc"), recon.Trigger)
 	pb := playback.New(store.Get, devices, log.With("component", "playback"))
+	ptzMgr := ptz.New(devices, store.Get, *dataDir, log.With("component", "ptz"))
 	srv := server.New(server.Deps{
 		Store: store, Keys: keys, Auth: authSvc, Devices: devices, Recon: recon, Process: proc,
-		Playback: pb, Conns: conns, Log: log.With("component", "http"), Version: buildinfo.Version, Static: webui.Handler(),
+		Playback: pb, PTZ: ptzMgr, Conns: conns, Log: log.With("component", "http"), Version: buildinfo.Version, Static: webui.Handler(),
 	})
 
 	// local displays: CNM serves desired state + kiosk credentials to the agent
@@ -301,6 +304,7 @@ func serve(args []string) int {
 	// ---- start ------------------------------------------------------------------------------
 	go br.Serve()
 	devices.Start()
+	ptzMgr.Start()
 	go recon.Run(ctx)
 	go proc.Run(ctx)
 	go pb.RunIndex(ctx)
@@ -439,6 +443,9 @@ func shutdown(log *slog.Logger, cancel context.CancelFunc, httpSrv *http.Server,
 			log.Info("closed media connections", "count", n)
 		}
 	})
+	if srv.PTZ != nil {
+		run(srv.PTZ.Close) // open controls stay stored and are ended after the next start
+	}
 	run(func() { devices.Close(ctx) })
 	run(br.Close)
 	run(cancel) // stops reconciler, managed go2rtc (SIGTERM → SIGKILL) and sweepers

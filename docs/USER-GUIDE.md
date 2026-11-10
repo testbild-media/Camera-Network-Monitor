@@ -13,6 +13,7 @@ Installation and server administration are covered in
 - [Logging in](#logging-in)
 - [The multiviewer](#the-multiviewer)
 - [Full-size view](#full-size-view)
+  - [Steering a camera (PTZ)](#steering-a-camera-ptz)
 - [Playback and download](#playback-and-download)
 - [My account and start screen](#my-account-and-start-screen)
 - [Settings](#settings)
@@ -81,6 +82,43 @@ so (*Substream*).
   multiviewer.
 - Press *Playback* to open the recordings of this camera. The button only
   appears if the device has recordings for this camera.
+
+### Steering a camera (PTZ)
+
+Cameras that can pan, tilt and zoom (currently with the protocol *Reolink*,
+*experimental*) show a control panel in the full-size view; *PTZ* in the
+header shows or hides it. Both lenses of a dual-lens camera (wide angle and
+tele) move together, so they share one control.
+
+Such cameras usually work by themselves: they rest in a **fixed position**
+(the camera calls it its guard position), follow people or vehicles
+(tracking) and then return to the fixed position. Manual control works
+alongside that:
+
+1. Press **Steuerung übernehmen** (take control). CNM switches the camera's
+   tracking off and postpones its own return to the fixed position, so it
+   does not pull away while you steer. Only you can steer now; other users
+   see who is steering and may take over after a confirmation.
+2. Hold a direction button (or an arrow key), use **+** / **−** to zoom,
+   pick a **stored position**, or press **⌂** to go to the fixed position.
+   The slider sets the speed. A movement stops when you let go – and also by
+   itself after a few seconds if the connection to the browser is lost.
+3. Press **Steuerung beenden** (end control): the camera moves back to its
+   fixed position, and tracking and the return are switched on again
+   exactly as they were before.
+
+If nobody touches the controls, CNM ends the control by itself after the
+**return time** (default 5 minutes, set per device under *PTZ: Rückkehr
+nach (Minuten)*); the panel shows the remaining time. Closing the full-size
+view keeps the control until then. If the camera is offline at that moment
+or CNM restarts, CNM restores the camera as soon as it can reach it again.
+As a second safety net, the camera's own return time is set to the same
+value while you steer (if the camera does not accept that, its return is
+switched off and CNM switches it on again afterwards).
+
+Administrators can store the current position as the new fixed position
+(*Als feste Position speichern*). Stored positions themselves are created
+in the camera's app.
 
 ## Playback and download
 
@@ -214,6 +252,97 @@ confirmed on real hardware.
 at most twice) and then stops, shown as *Login gesperrt*. This protects the
 recorder account from being locked. Correct the password, or press
 *Reconnect* after fixing it on the device.
+
+**Device settings** – *Geräteeinstellungen* (Dahua with RPC2 and Sofia/DVRIP)
+changes settings inside the recorder itself, with the login stored in CNM –
+you do not need the recorder's own menu or software for this:
+
+- **Encoding** per channel, for the main stream (recording, full-size view)
+  and the sub stream (multiviewer tiles): codec, resolution, frames per
+  second, bitrate type (VBR/CBR), bitrate, quality and keyframe interval.
+  *Encode von Kanal 1 auf alle übertragen* copies channel 1's values to all
+  channels.
+- **Channel names** as the recorder shows them.
+- **Recording**: continuous, only on motion, or off – optionally only within a
+  daily time window (e.g. 18:00–06:00). A more complex schedule set up on the
+  recorder is shown as *Eigener Zeitplan* and kept unless you choose another
+  mode.
+- **Motion detection** on/off, its sensitivity and – where offered – the
+  recorder's buzzer on motion.
+- **Alarms** per channel: *Videoverlust* (the camera signal is lost) and
+  *Sabotage* (the camera is covered) – on/off, the recorder's buzzer
+  (*Summer*) and recording the channel on the event (*Aufnahme*).
+- **Disk alarms**: how the recorder reacts when there is no disk, a disk
+  fault or little free space (on/off, buzzer, limit in percent). With
+  *overwriting* the disk is always full – leave *Wenig Speicherplatz* off
+  then.
+- **Time**: the recorder's clock compared with the server, *Uhr jetzt auf
+  Serverzeit stellen*, and the time server (NTP).
+- **Disk**: size, free space, the period the recordings cover (where the
+  recorder reports it), whether the oldest recordings are overwritten when
+  the disk is full, and an estimate of how many days of recordings fit with
+  the chosen bitrates. If the newest recording is older than a few hours
+  although recording is switched on, CNM warns that the recorder is not
+  recording – usually a faulty or unformatted disk. Recorders that do not
+  report their disk: CNM adds up their recording files instead – once the
+  disk is full and overwritten, that is about its size.
+- **System**: the device name, the video standard (PAL/NTSC – it must
+  match the cameras, a change restarts the recorder) and, on Sofia/DVRIP,
+  the automatic maintenance restart (day and hour, or never). A recorder
+  with an empty clock battery may lose its time at every restart.
+- **Network** – shown only (address, mask, gateway, DNS, DHCP, MAC, ports):
+  a wrong value changed from afar could make the recorder unreachable.
+- **Users** (*Benutzer des Rekorders*): the recorder's user accounts and
+  *Passwort ändern …*. For the account CNM logs in with, CNM knows the old
+  password; for others it is asked for. CNM checks a new password with a
+  second, separate login and only then relies on it – if that login fails,
+  CNM restores the old password at once. A new password of CNM's own
+  account is stored in CNM, and the recorder connects again with it.
+  *Passwort mehrerer Rekorder ändern* in the device list sets one new
+  password for CNM's account on several recorders, one after another, each
+  checked the same way. Apps and programs that log in with the old password
+  have to be changed afterwards. Passwords are never shown or logged.
+- *Neu starten* restarts the recorder.
+- **Recorder log** (*Protokoll des Geräts*, Sofia/DVRIP): the recorder's
+  own event log – restarts, clock changes, changed settings, logins –
+  filtered by kind and period. Useful to find out from afar why a recorder
+  stopped recording or loses its time.
+- **Format the disk** (*Formatieren …*, Sofia/DVRIP): deletes all
+  recordings of the partition. To confirm, type the device name. It takes a
+  few minutes; some recorders restart afterwards. If the disk itself is
+  defective, the recorder refuses or the error remains – then it has to be
+  replaced.
+
+Before saving, CNM lists what will be changed. Values outside what CNM knows
+for the recorder are shown as a hint – the recorder decides; *Trotzdem
+senden* sends them anyway. If the recorder refuses an encoding, CNM explains
+per channel which resolutions the recorder allows. CNM does not judge the
+encoder load: the capacity older recorders report is no real limit.
+
+Several channels are saved **one after another**: many recorders refuse a
+whole block when a single channel in it has a value they do not accept. A
+channel the recorder refuses is listed under *Nicht alles gespeichert*; the
+other channels are saved. Older DVRIP recorders allow only certain sub
+stream resolutions with each main resolution (with a QCIF main stream, for
+example, only a QCIF sub stream) – even for a switched-off sub stream. CNM
+then sets the largest allowed sub stream resolution itself and says so.
+
+After saving, CNM reads the settings back from the recorder; values the
+recorder did not take over as requested (for example a bitrate it limits)
+are listed. Older recorders do not report which values they accept – CNM
+then offers common values, and the recorder may refuse some. Live video and
+recording of the changed channels can be interrupted briefly while the
+recorder applies the change.
+
+**Recorder monitoring** – CNM checks every connected recorder with device
+settings once an hour: whether a disk is present and reports no fault,
+whether the newest recording is recent, whether every channel that records
+around the clock has recorded in the last three hours, whether a full disk
+is not overwritten, and whether the recorder's clock is right. Problems are
+shown in the device list, at the top of *Geräteeinstellungen* (with *Jetzt
+prüfen* for an immediate check) and – for admins – as *Rekorder mit
+Problemen* in the top bar. Channels set to motion recording, to a time
+window or to no recording are not expected to have recent recordings.
 
 **Network search** – *Netzwerk durchsuchen* looks for devices in the local
 network and lists only those that are not added yet. *Hinzufügen* opens the

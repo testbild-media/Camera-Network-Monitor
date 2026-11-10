@@ -90,3 +90,10 @@ func MergeRecordings(in []Recording, from, to time.Time, maxGap time.Duration) [
 	}
 	return out
 }
+
+// WallNow is the server's local wall clock labelled UTC, comparable with
+// device wall clock times.
+func WallNow() time.Time {
+	l := time.Now()
+	return time.Date(l.Year(), l.Month(), l.Day(), l.Hour(), l.Minute(), l.Second(), 0, time.UTC)
+}

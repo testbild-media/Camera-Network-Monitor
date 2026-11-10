@@ -4,6 +4,7 @@ import store from '../store.js';
 import { h, clear, select, field, fmtAgo, busy } from '../dom.js';
 import { openDialog, confirmDialog, setMessage, toast } from '../dialog.js';
 import { guarded } from './index.js';
+import { openDeviceConfig, supportsDeviceConfig } from './devconfig.js';
 
 const STATE_LABEL = {
   connected: 'Verbunden',
@@ -26,6 +27,10 @@ function statusCell(st) {
   if (st && st.nextRetry && state === 'disconnected') details.push(`nächster Versuch ${new Date(st.nextRetry).toLocaleTimeString()}`);
   if (st && st.lastOk && state !== 'connected') details.push(`zuletzt OK ${fmtAgo(st.lastOk)}`);
   if (details.length) el.appendChild(h('div', { class: 'status-detail' }, details.join(' · ')));
+  const mon = st && st.monitor;
+  if (mon && mon.problems && mon.problems.length) {
+    el.appendChild(h('div', { class: 'status-detail monitor-problem' }, `⚠ ${mon.problems.join(' · ')}`));
+  }
   return el;
 }
 
@@ -47,6 +52,7 @@ export function renderDevices(root, ctx) {
     h('div', { class: 'toolbar' },
       h('h2', {}, 'Geräte'),
       h('span', { class: 'faint' }, 'Geräte stellen Kameras bereit – Kameras werden im Tab „Kameras“ verwaltet.'),
+      h('button', { class: 'btn', onclick: () => openBulkPassword(ctx) }, 'Passwort mehrerer Rekorder ändern'),
       h('button', { class: 'btn', onclick: () => openDiscovery(ctx) }, 'Netzwerk durchsuchen'),
       h('button', { class: 'btn primary', onclick: () => editDevice(ctx, null) }, 'Gerät hinzufügen'),
     ),
@@ -77,6 +83,7 @@ export function renderDevices(root, ctx) {
           if (await guarded(() => api.post('/api/devices/reconnect', { id: d.id })) !== false) toast(`${d.label}: Neuverbindung angestoßen`);
         }) }, 'Reconnect'),
         h('button', { class: 'btn small', onclick: () => editDevice(ctx, d) }, 'Bearbeiten'),
+        supportsDeviceConfig(proto) ? h('button', { class: 'btn small', title: 'Encode, Kanalnamen, Uhrzeit, Aufnahme und Bewegungserkennung im Gerät einstellen', onclick: () => openDeviceConfig(d) }, 'Geräteeinstellungen') : null,
         h('button', { class: 'btn small danger', onclick: async (e) => {
           const btn = e.currentTarget;
           if (!await confirmDialog('Gerät löschen', `„${d.label}“ wirklich löschen? Die ${cams.length} bereitgestellten Kameras werden ebenfalls entfernt (auch aus Gruppen und Monitoren).`, { confirmLabel: 'Löschen', danger: true })) return;
@@ -186,6 +193,57 @@ function discoveryRows(ctx, result, showAdded, rerender) {
   return h('table', { class: 'list' },
     h('thead', {}, h('tr', {}, h('th', {}, 'Adresse'), h('th', {}, 'Gerät'), h('th', {}, 'Erkannt über'), h('th', {}, 'Kennung'), h('th', {}))),
     h('tbody', {}, rows));
+}
+
+// one new password for CNM's login on several recorders
+function openBulkPassword(ctx) {
+  const devs = (ctx.data.devices || []).filter((d) => supportsDeviceConfig(protocolOf(ctx, d.protocol)) && d.username);
+  const rows = devs.map((d) => {
+    const st = store.devices.get(d.id) || d.status;
+    const online = st && (st.state === 'connected' || st.state === 'degraded');
+    const cb = h('input', { type: 'checkbox', disabled: !online });
+    return { d, cb, el: h('label', { class: 'check' }, cb, `${d.label} – Benutzer „${d.username}“${online ? '' : ' (nicht verbunden)'}`) };
+  });
+  const newIn = h('input', { type: 'password', autocomplete: 'new-password', maxlength: '32' });
+  const rep = h('input', { type: 'password', autocomplete: 'new-password', maxlength: '32' });
+  const m = h('div', { class: 'msg', hidden: true });
+  const results = h('div');
+  const body = h('div', {},
+    h('div', { class: 'msg' }, 'CNM ändert das Passwort des Zugangs, mit dem es sich anmeldet, auf jedem gewählten Rekorder nacheinander. Jeder Rekorder wird mit einer zweiten Anmeldung geprüft; klappt sie nicht, stellt CNM dort das alte Passwort wieder her. Erfolgreich geänderte Passwörter übernimmt CNM automatisch.'),
+    devs.length ? h('div', { class: 'stack' }, rows.map((r) => r.el)) : h('p', { class: 'muted' }, 'Keine Rekorder mit Geräteeinstellungen.'),
+    field('Neues Passwort', newIn, '1–32 Zeichen; manche Rekorder verlangen Buchstaben und Ziffern.'),
+    field('Neues Passwort wiederholen', rep),
+    h('p', { class: 'faint' }, 'Apps und Programme, die sich mit dem alten Passwort anmelden, müssen danach angepasst werden.'),
+    m, results);
+  openDialog({
+    title: 'Passwort mehrerer Rekorder ändern',
+    size: 'medium',
+    body,
+    enterSubmits: false,
+    actions: [
+      { label: 'Schließen' },
+      {
+        label: 'Passwörter ändern',
+        kind: 'primary',
+        onClick: async () => {
+          const ids = rows.filter((r) => r.cb.checked).map((r) => r.d.id);
+          if (!ids.length) { setMessage(m, 'Bitte mindestens einen Rekorder wählen.'); return false; }
+          if (!newIn.value || newIn.value !== rep.value) { setMessage(m, 'Die beiden neuen Passwörter stimmen nicht überein.'); return false; }
+          if (!await confirmDialog('Passwörter ändern', `Auf ${ids.length} Rekorder${ids.length === 1 ? '' : 'n'} das Passwort des CNM-Zugangs ändern?`, { confirmLabel: 'Ändern' })) return false;
+          setMessage(m, 'Ändert und prüft nacheinander … das kann pro Rekorder einige Sekunden dauern.', 'warn');
+          clear(results);
+          try {
+            const r = await api.post('/api/settings/devices/password', { deviceIds: ids, newPassword: newIn.value });
+            const res = r.results || [];
+            const bad = res.filter((x) => !x.ok).length;
+            setMessage(m, bad ? `${res.length - bad} geändert, ${bad} nicht geändert – siehe Liste.` : `Alle ${res.length} geändert.`, bad ? 'warn' : 'ok');
+            results.appendChild(h('ul', {}, res.map((x) => h('li', {}, `${x.label || x.id}: `, x.ok ? h('span', { class: 'ok-text' }, 'geändert') : h('span', { class: 'warn-text' }, x.error || 'Fehler')))));
+          } catch (e) { setMessage(m, e.message); }
+          return false;
+        },
+      },
+    ],
+  });
 }
 
 function openDiscovery(ctx) {

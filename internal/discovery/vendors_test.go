@@ -37,6 +37,7 @@ func TestONVIFProtocolHints(t *testing.T) {
 	for _, c := range []struct{ scopes, proto string }{
 		{"onvif://www.onvif.org/name/AXIS onvif://www.onvif.org/hardware/CAM1", protoAxis},
 		{"onvif://www.onvif.org/name/UNIVIEW onvif://www.onvif.org/hardware/CAM2", protoUniview},
+		{"onvif://www.onvif.org/name/Reolink onvif://www.onvif.org/hardware/CAM5", protoReolink},
 		{"onvif://www.onvif.org/name/Dahua onvif://www.onvif.org/type/NetworkVideoRecorder", protoDahua},
 		{"onvif://www.onvif.org/name/VENDOR1 onvif://www.onvif.org/hardware/CAM3", protoONVIF},
 		{"onvif://www.onvif.org/name/VENDOR2 onvif://www.onvif.org/type/NetworkVideoRecorder", protoONVIF},

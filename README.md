@@ -36,6 +36,7 @@ The user interface is in **German**.
 | Hikvision (ISAPI) | experimental | experimental | experimental |
 | Axis (VAPIX, edge storage) | experimental | experimental | experimental |
 | Uniview (RTSP) | experimental | – (availability check) | experimental |
+| Reolink (HTTP API; incl. PTZ control and dual-lens cameras) | experimental | experimental | experimental |
 | ONVIF (Profile S/G) | yes | experimental (time span only) | experimental |
 | RTSP, RTMP, HTTP stream (MJPEG/H.264/MPEG-TS), raw H.264 over TCP | yes | – | – |
 

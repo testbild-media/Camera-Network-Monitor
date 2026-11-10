@@ -42,10 +42,15 @@ type rpcDriver struct {
 	env      provider.Env
 	rpc      *rpcClient
 	clock    provider.Clock
-	channels int // from the device's channel titles
+	channels int    // from the device's channel titles
+	firmware string // software version (decides whether H.265 is offered)
 
 	pbMu   sync.Mutex
 	pbBase int // playback channel numbering (pbUnknown until detected)
+
+	diskMu  sync.Mutex
+	diskEst []provider.DiskInfo // recording usage for firmware without disk report
+	diskAt  time.Time
 }
 
 func newRPCDriver(cfg provider.DeviceConfig, env provider.Env, variant string) *rpcDriver {
@@ -89,6 +94,7 @@ func (d *rpcDriver) Connect(ctx context.Context) (*provider.DeviceInfo, error) {
 		}
 		if decodeParams(r, &p) == nil {
 			info.Firmware = strings.TrimSpace(p.Version.Version + " " + p.Version.BuildDate)
+			d.firmware = p.Version.Version
 		}
 	}
 	if r, err := d.rpc.call(ictx, "configManager.getConfig", map[string]any{"name": "ChannelTitle"}, nil); err == nil && r.ok() {
